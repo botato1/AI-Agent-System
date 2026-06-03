@@ -2,7 +2,7 @@
 from typing import List
 from pydantic import BaseModel
 
-from schemas.common_schema import CommonDocumentSchema
+from backend.schemas.common_schema import CommonDocumentSchema
 
 
 # RAG 검색용 청크 하나의 구조

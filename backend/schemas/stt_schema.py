@@ -2,7 +2,7 @@
 from typing import List
 from pydantic import BaseModel
 
-from schemas.common_schema import CommonDocumentSchema
+from backend.schemas.common_schema import CommonDocumentSchema
 
 
 # transcription 배열 안에 들어가는 대사 하나의 구조
