@@ -1,6 +1,6 @@
 # ChromaDB / RAG 관련 구조
 from typing import Optional, List
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ChromaMetadataSchema(BaseModel):
@@ -21,6 +21,25 @@ class ChromaMetadataSchema(BaseModel):
     chunk_id: Optional[str] = None
     page_number: Optional[int] = None
     content_type: Optional[str] = None
+
+class RagSearchItemSchema(BaseModel):
+    id: str
+    content: str
+    source: str
+    source_url: Optional[str] = None
+    data_type: Optional[str] = None
+    importance: Optional[int] = None
+    score: Optional[float] = None
+    title: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class RagSearchResponseSchema(BaseModel):
+    status: str
+    query: str
+    count: int
+    data: List[RagSearchItemSchema] = Field(default_factory=list)
+    error: Optional[str] = None
 
 
 class ChromaSearchResultSchema(BaseModel):

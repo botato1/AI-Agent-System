@@ -1,11 +1,9 @@
-# Notion 저장 요청 / 결과 구조
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from schemas.task_schema import TaskItemSchema
+from backend.schemas.task_schema import TaskItemSchema
 
 
-# Notion에 저장할 데이터 구조
 class NotionSaveRequest(BaseModel):
     id: Optional[str] = None
     title: str
@@ -13,15 +11,19 @@ class NotionSaveRequest(BaseModel):
     source: str
     content: Optional[str] = None
     summary: Optional[str] = None
-    tasks: List[TaskItemSchema] = []
-    room_id: Optional[str] = None
+    language: Optional[str] = "ko"
     created_at: str
-    notion_url: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
     status: str
+    notion_url: Optional[str] = None
+    chroma_id: Optional[str] = None
+    user_edited: bool = False
     error: Optional[str] = None
 
+    room_id: Optional[str] = None
+    tasks: List[TaskItemSchema] = Field(default_factory=list)
 
-# Notion 저장 결과 구조
+
 class NotionSaveResponse(BaseModel):
     status: str
     notion_url: Optional[str] = None
