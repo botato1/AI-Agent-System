@@ -51,3 +51,20 @@ class ChromaSearchResultSchema(BaseModel):
 
 class RagSearchResponseSchema(BaseModel):
     results: List[ChromaSearchResultSchema]
+
+# Ollama 요청 구조
+class OllamaRequest(BaseModel):
+    user_input: str
+    conversation_id: Optional[str] = None
+    filter_type: Optional[str] = None
+
+
+# Ollama 응답 구조
+class OllamaResponse(BaseModel):
+    status: str
+    original_input: str
+    normalized_input: str
+    intent: str
+    answer: str
+    sources: List[str] = Field(default_factory=list)
+    error: Optional[str] = None
