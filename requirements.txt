@@ -45,6 +45,7 @@ markdown-it-py==4.2.0
 mdurl==0.1.2
 mmh3==5.2.1
 multidict==6.7.1
+notion-client==3.1.0
 numpy==2.4.6
 oauthlib==3.3.1
 onnxruntime==1.26.0
@@ -88,6 +89,7 @@ typing_extensions==4.15.0
 urllib3==2.7.0
 uuid_utils==0.16.0
 uvicorn==0.48.0
+uvloop==0.22.1
 watchfiles==1.2.0
 websocket-client==1.9.0
 websockets==16.0
