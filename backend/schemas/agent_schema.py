@@ -1,19 +1,20 @@
-from typing import TypedDict, List, Optional, Any
+from typing import TypedDict, List, Optional
 
 
 class AgentState(TypedDict):
     # 1. 채팅 기본 정보
     room_id: str
     user_message: str
+    source: str
+    created_at: str
     messages: List[dict]
 
     # 2. 문서 / STT / 파일 처리 결과
-    # document_json 안에 공통 키 14개 + 모듈 전용 키가 들어감
     document_json: Optional[dict]
 
     # 3. 이전 대화 / RAG 검색 결과
     memory_context: Optional[str]
-    rag_context: Optional[Any]
+    rag_context: Optional[str]
     sources: List[dict]
 
     # 4. 질문 유형 판단 결과

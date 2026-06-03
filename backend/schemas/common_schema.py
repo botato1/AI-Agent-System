@@ -1,4 +1,4 @@
-# 공통 키 13개 정의
+# 공통 키 14개 정의
 from typing import Optional, List
 # pydantic : Python에서 데이터 검증 및 설정 관리를 위한 라이브러리
 from pydantic import BaseModel

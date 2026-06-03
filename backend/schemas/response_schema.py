@@ -1,35 +1,34 @@
-# FastAPI 최종 응답 구조
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from schemas.task_schema import TaskItemSchema
+from backend.schemas.task_schema import TaskItemSchema
 
 
-# RAG 검색에 사용된 참고 문서 정보
 class SourceSchema(BaseModel):
     id: str
-    title: str
+    title: Optional[str] = None
     source: str
+    source_url: Optional[str] = None
+    data_type: Optional[str] = None
     score: Optional[float] = None
+    importance: Optional[int] = None
     created_at: Optional[str] = None
     notion_url: Optional[str] = None
     tags: Optional[List[str]] = None
 
 
-# Notion 저장 결과
 class NotionResultSchema(BaseModel):
     status: str
     notion_url: Optional[str] = None
     error: Optional[str] = None
 
 
-# React에 반환할 최종 채팅 응답 구조
 class ChatResponseSchema(BaseModel):
     room_id: str
     answer: str
     summary: Optional[str] = None
-    tasks: List[TaskItemSchema] = []
-    sources: List[SourceSchema] = []
+    tasks: List[TaskItemSchema] = Field(default_factory=list)
+    sources: List[SourceSchema] = Field(default_factory=list)
     notion_result: Optional[NotionResultSchema] = None
     graph_data: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
