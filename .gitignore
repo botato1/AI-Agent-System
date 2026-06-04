@@ -4,3 +4,12 @@ __pycache__/
 *.pyc
 .DS_Store
 frontend/node_modules/
+# 테스트 파일
+test_file/
+
+# 데이터 파일
+data/raw/
+storage/
+
+# 모델 결과물
+models/
