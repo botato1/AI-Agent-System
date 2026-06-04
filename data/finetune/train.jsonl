@@ -220,3 +220,81 @@
 {"instruction": "질문의 의도를 분류하라", "input": "깃 커밋 메시지 어떻게 써", "output": "general"}
 {"instruction": "질문의 의도를 분류하라", "input": "코드 컨벤션이 뭐야", "output": "general"}
 {"instruction": "질문의 의도를 분류하라", "input": "PR 어떻게 올려", "output": "general"}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "API 응답 느려터졌어", "output": "API 응답 속도가 저하되었다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "서킷브레이커 열렸어", "output": "Circuit Breaker가 작동하여 요청이 차단되었다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "리트라이 로직 넣어야해", "output": "재시도 로직을 구현해야 한다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "멱등키 써야해", "output": "Idempotency Key를 사용해야 한다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "옵저버빌리티 챙겨야해", "output": "시스템 관찰 가능성을 확보해야 한다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "트레이싱 붙여야해", "output": "분산 추적 시스템을 연동해야 한다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "메트릭 수집 안돼", "output": "메트릭 수집이 실패했다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "알럿 울렸어", "output": "모니터링 알림이 발생했다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "온콜 받았어", "output": "온콜 알림을 수신했다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "포스트모텀 써야해", "output": "장애 사후 분석 보고서를 작성해야 한다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "테크뎁 쌓였어", "output": "기술 부채가 누적되었다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "레거시 코드 건드려야해", "output": "레거시 코드를 수정해야 한다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "리팩 해야해", "output": "리팩토링이 필요하다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "코드 스멜 나", "output": "코드 품질이 저하되어 있다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "커버리지 낮아", "output": "테스트 커버리지가 낮다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "유닛테스트 짜야해", "output": "단위 테스트를 작성해야 한다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "E2E 테스트 추가해야해", "output": "End-to-End 테스트를 추가해야 한다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "목 객체 써야해", "output": "Mock 객체를 사용해야 한다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "픽스처 만들어야해", "output": "테스트 Fixture를 생성해야 한다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "스냅샷 테스트 깨졌어", "output": "스냅샷 테스트가 실패했다."}
+{"instruction": "질문의 의도를 분류하라", "input": "저번 장애때 포스트모텀 어떻게 썼지", "output": "past_record_search"}
+{"instruction": "질문의 의도를 분류하라", "input": "지난번 리팩토링 어떻게 했어", "output": "past_record_search"}
+{"instruction": "질문의 의도를 분류하라", "input": "예전에 서킷브레이커 어떻게 설정했지", "output": "past_record_search"}
+{"instruction": "질문의 의도를 분류하라", "input": "저번 온콜 때 뭐가 문제였어", "output": "past_record_search"}
+{"instruction": "질문의 의도를 분류하라", "input": "지난 회의에서 테크뎁 어떻게 처리하기로 했지", "output": "past_record_search"}
+{"instruction": "질문의 의도를 분류하라", "input": "서킷브레이커가 뭐야", "output": "term_explanation"}
+{"instruction": "질문의 의도를 분류하라", "input": "옵저버빌리티가 뭐야", "output": "term_explanation"}
+{"instruction": "질문의 의도를 분류하라", "input": "분산 추적이 뭐야", "output": "term_explanation"}
+{"instruction": "질문의 의도를 분류하라", "input": "멱등성이 뭐야", "output": "term_explanation"}
+{"instruction": "질문의 의도를 분류하라", "input": "테크뎁이 뭐야", "output": "term_explanation"}
+{"instruction": "질문의 의도를 분류하라", "input": "API 왜 이렇게 느려", "output": "error_troubleshooting"}
+{"instruction": "질문의 의도를 분류하라", "input": "알럿 왜 울려", "output": "error_troubleshooting"}
+{"instruction": "질문의 의도를 분류하라", "input": "메트릭 왜 안잡혀", "output": "error_troubleshooting"}
+{"instruction": "질문의 의도를 분류하라", "input": "커버리지 왜 이렇게 낮아", "output": "error_troubleshooting"}
+{"instruction": "질문의 의도를 분류하라", "input": "스냅샷 테스트 왜 깨져", "output": "error_troubleshooting"}
+{"instruction": "질문의 의도를 분류하라", "input": "이번 스프린트 리팩토링 담당자 누구야", "output": "task_extraction"}
+{"instruction": "질문의 의도를 분류하라", "input": "테스트 커버리지 올리는거 누가 담당이야", "output": "task_extraction"}
+{"instruction": "질문의 의도를 분류하라", "input": "포스트모텀 작성 누가 해야해", "output": "task_extraction"}
+{"instruction": "질문의 의도를 분류하라", "input": "온콜 일정 누가 담당이야", "output": "task_extraction"}
+{"instruction": "질문의 의도를 분류하라", "input": "레거시 코드 정리 언제까지야", "output": "task_extraction"}
+{"instruction": "질문의 의도를 분류하라", "input": "리팩토링 어떻게 해", "output": "general"}
+{"instruction": "질문의 의도를 분류하라", "input": "테스트 커버리지 어떻게 올려", "output": "general"}
+{"instruction": "질문의 의도를 분류하라", "input": "포스트모텀 어떻게 써", "output": "general"}
+{"instruction": "질문의 의도를 분류하라", "input": "서킷브레이커 어떻게 설정해", "output": "general"}
+{"instruction": "질문의 의도를 분류하라", "input": "모니터링 어떻게 붙여", "output": "general"}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "싱글톤 패턴 써야해", "output": "Singleton 패턴을 적용해야 한다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "팩토리 패턴으로 바꿔야해", "output": "Factory 패턴으로 리팩토링이 필요하다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "옵저버 패턴 넣어야해", "output": "Observer 패턴을 구현해야 한다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "DI 컨테이너 써야해", "output": "의존성 주입 컨테이너를 사용해야 한다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "인터페이스 분리해야해", "output": "인터페이스를 분리하여 의존성을 줄여야 한다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "추상화 레이어 넣어야해", "output": "추상화 레이어를 추가해야 한다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "의존성 역전 원칙 지켜야해", "output": "의존성 역전 원칙을 적용해야 한다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "단일책임 원칙 위반이야", "output": "단일 책임 원칙이 위반되었다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "개방폐쇄 원칙 지켜야해", "output": "개방 폐쇄 원칙을 적용해야 한다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "도메인 모델 정리해야해", "output": "도메인 모델을 정리해야 한다."}
+{"instruction": "질문의 의도를 분류하라", "input": "싱글톤 패턴이 뭐야", "output": "term_explanation"}
+{"instruction": "질문의 의도를 분류하라", "input": "DI가 뭐야", "output": "term_explanation"}
+{"instruction": "질문의 의도를 분류하라", "input": "SOLID 원칙 설명해줘", "output": "term_explanation"}
+{"instruction": "질문의 의도를 분류하라", "input": "도메인 주도 설계가 뭐야", "output": "term_explanation"}
+{"instruction": "질문의 의도를 분류하라", "input": "클린 아키텍처가 뭐야", "output": "term_explanation"}
+{"instruction": "질문의 의도를 분류하라", "input": "저번에 DI 어떻게 설정했지", "output": "past_record_search"}
+{"instruction": "질문의 의도를 분류하라", "input": "지난번 도메인 모델 어떻게 짰지", "output": "past_record_search"}
+{"instruction": "질문의 의도를 분류하라", "input": "예전에 싱글톤 문제 어떻게 해결했지", "output": "past_record_search"}
+{"instruction": "질문의 의도를 분류하라", "input": "도메인 모델 리팩토링 누가 담당이야", "output": "task_extraction"}
+{"instruction": "질문의 의도를 분류하라", "input": "아키텍처 설계 언제까지야", "output": "task_extraction"}
+{"instruction": "질문의 의도를 분류하라", "input": "DI 어떻게 설정해", "output": "general"}
+{"instruction": "질문의 의도를 분류하라", "input": "클린 아키텍처 어떻게 적용해", "output": "general"}
+{"instruction": "질문의 의도를 분류하라", "input": "도메인 모델 어떻게 설계해", "output": "general"}
+{"instruction": "질문의 의도를 분류하라", "input": "단위 테스트 어떻게 써", "output": "general"}
+{"instruction": "질문의 의도를 분류하라", "input": "Mock 객체 어떻게 써", "output": "general"}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "그린필드 프로젝트야", "output": "신규 프로젝트로 처음부터 개발한다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "브라운필드 프로젝트야", "output": "기존 레거시 시스템을 개선하는 프로젝트다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "피쳐 플래그 써야해", "output": "Feature Flag를 적용해야 한다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "카나리 배포 해야해", "output": "Canary 배포 전략을 사용해야 한다."}
+{"instruction": "개발자 은어를 표준 용어로 변환하라", "input": "블루그린 배포로 바꿔야해", "output": "Blue-Green 배포 전략으로 전환해야 한다."}
+{"instruction": "질문의 의도를 분류하라", "input": "카나리 배포가 뭐야", "output": "term_explanation"}
+{"instruction": "질문의 의도를 분류하라", "input": "블루그린 배포 어떻게 해", "output": "general"}
+{"instruction": "질문의 의도를 분류하라", "input": "피쳐 플래그 누가 설정해야해", "output": "task_extraction"}
