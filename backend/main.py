@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
 from backend.routers.chat_router import router as chat_router
+from backend.routers.rag_router import router as rag_router
 
 app = FastAPI(
     title="AI-Agent-System Backend",
@@ -9,6 +10,7 @@ app = FastAPI(
 )
 
 app.include_router(chat_router)
+app.include_router(rag_router)
 
 @app.get("/")
 def root():

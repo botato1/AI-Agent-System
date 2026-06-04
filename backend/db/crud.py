@@ -144,3 +144,21 @@ def get_all_facts(conversation_id: str) -> list:
     rows = cursor.fetchall()
     conn.close()
     return rows
+
+# ==========================================
+#   5. 대화방 목록 전체 조회(최신 수정일 기준으로 정렬)
+# ==========================================
+def get_conversations() -> list:
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT id, title, created_at, updated_at
+        FROM conversations
+        ORDER BY updated_at DESC
+    """)
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    return rows

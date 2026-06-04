@@ -1,10 +1,14 @@
 # 채팅 관련 API 엔드포인트
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 from backend.schemas.chat_schema import ChatRequest, ChatHistoryResponse
 from backend.schemas.response_schema import ChatResponseSchema
-from backend.db.crud import insert_message, get_messages
+from backend.services.chat_service import handle_chat
+from backend.db.crud import create_conversation, get_conversations, get_messages
 
+class ConversationCreateRequest(BaseModel):
+    title : str = "새 대화"
 
 router = APIRouter(
     prefix="/api",
@@ -14,36 +18,8 @@ router = APIRouter(
 
 # 사용자 채팅 메시지 전송 API
 @router.post("/chat", response_model=ChatResponseSchema)
-def send_chat_message(request: ChatRequest):
-
-    # 1. 사용자 메시지 DB 저장
-    insert_message(
-        conversation_id=request.room_id,
-        role="user",
-        content=request.content
-    )
-
-    # 2. 임시 assistant 응답 생성 (LangGraph 연결 전 더미 데이터)
-    answer = "현재는 LangGraph 연결 전 더미 응답입니다."
-
-    # 3. assistant 메시지 DB 저장
-    insert_message(
-        conversation_id=request.room_id,
-        role="assistant",
-        content=answer
-    )
-
-    # 4. 프론트로 응답 반환
-    return {
-        "room_id": request.room_id,
-        "answer": answer,
-        "summary": None,
-        "tasks": [],
-        "sources": [],
-        "notion_result": None,
-        "graph_data": None,
-        "error": None
-    }
+async def send_chat_message(request: ChatRequest):
+    return await handle_chat(request)
 
 
 # 특정 채팅방의 이전 대화 기록 조회 API
@@ -64,4 +40,33 @@ def get_chat_history(room_id: str):
     return {
         "room_id": room_id,
         "messages": messages
+    }
+
+# 새 채팅방을 생성하는 API
+@router.post("/conversations")
+def create_chat_room(request: ConversationCreateRequest):
+    room_id = create_conversation(request.title)
+
+    return {
+        "room_id" : room_id,
+        "title" : request.title
+    }
+
+# 전체 채팅방 목록을 조회하는 API
+@router.get("/conversations")
+def get_chat_rooms():
+    rows = get_conversations()
+
+    conversations = [
+        {
+            "room_id": row[0],
+            "title": row[1],
+            "created_at": row[2],
+            "updated_at": row[3]
+        }
+        for row in rows
+    ]
+
+    return {
+        "conversations": conversations
     }
