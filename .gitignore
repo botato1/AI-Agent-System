@@ -9,3 +9,5 @@ test_file/
 
 # 자동 생성 저장소
 storage/
+
+data/raw/
