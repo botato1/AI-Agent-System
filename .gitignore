@@ -4,3 +4,8 @@ __pycache__/
 *.pyc
 .DS_Store
 frontend/node_modules/
+# 테스트 파일
+test/
+
+# 자동 생성 저장소
+storage/
