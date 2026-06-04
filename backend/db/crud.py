@@ -1,7 +1,7 @@
 import sqlite3
 import uuid
 from datetime import datetime, timezone
-from backend.db.database import DB_PATH  # database.py에 정의된 DB_PATH를 그대로 가져옵니다.
+from backend.db.database import DB_PATH, get_connection  # database.py에 정의된 DB_PATH를 그대로 가져옵니다.
 
 
 def get_utc_now() -> str:
@@ -70,7 +70,7 @@ def get_messages(conversation_id: str) -> list:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT role, content, created_at FROM messages 
+        SELECT id, role, content, created_at FROM messages 
         WHERE conversation_id = ? 
         ORDER BY created_at ASC
     """, (conversation_id,))
@@ -144,3 +144,72 @@ def get_all_facts(conversation_id: str) -> list:
     rows = cursor.fetchall()
     conn.close()
     return rows
+
+# ==========================================
+#   5. 대화방 목록 전체 조회(최신 수정일 기준으로 정렬)
+# ==========================================
+def get_conversations() -> list:
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT id, title, created_at, updated_at
+        FROM conversations
+        ORDER BY updated_at DESC
+    """)
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    return rows
+
+# 6. 채팅방과 해당 채팅방의 메시지를 삭제
+def delete_conversation(room_id: str) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # 1. 해당 채팅방 메시지 먼저 삭제
+    cursor.execute(
+        """
+        DELETE FROM messages
+        WHERE conversation_id = ?
+        """,
+        (room_id,)
+    )
+
+    # 2. 채팅방 삭제
+    cursor.execute(
+        """
+        DELETE FROM conversations
+        WHERE id = ?
+        """,
+        (room_id,)
+    )
+
+    deleted_count = cursor.rowcount
+
+    conn.commit()
+    conn.close()
+
+    return deleted_count > 0
+
+# 특정 메시지 1개를 삭제하는 함수
+def delete_message(message_id: str) -> bool:
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        DELETE FROM messages
+        WHERE id = ?
+        """,
+        (message_id,)
+    )
+
+    deleted_count = cursor.rowcount
+
+    conn.commit()
+    conn.close()
+
+    return deleted_count > 0
