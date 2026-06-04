@@ -49,7 +49,7 @@ def create_initial_state(request: ChatRequest) -> AgentState:
 
 # 채팅 요청을 처리하는 함수
 async def handle_chat(request: ChatRequest) -> ChatResponseSchema:
-    
+
     # 1. 사용자 메시지 DB 저장
     insert_message(
         conversation_id=request.room_id,
@@ -66,19 +66,20 @@ async def handle_chat(request: ChatRequest) -> ChatResponseSchema:
         conversation_id=request.room_id
     )
 
-    # 4. Ollama 응답 값 정리
+    # 4. OllamaService 결과 정리
     answer = ollama_result.get("answer", "응답을 생성하지 못했습니다.")
     intent = ollama_result.get("intent", "general")
     sources = ollama_result.get("sources", [])
     error = ollama_result.get("error")
 
-    # 5. intent에 따라 AgentState 일부 업데이트
+    # 5. AgentState 업데이트
     state["question_type"] = intent
     state["final_answer"] = answer
     state["sources"] = sources
     state["error"] = error
     state["current_step"] = "ollama_service"
 
+    # 6. intent에 따라 필요한 작업 표시
     if intent == "rag_search":
         state["need_rag"] = True
         state["need_general_answer"] = False
@@ -87,15 +88,22 @@ async def handle_chat(request: ChatRequest) -> ChatResponseSchema:
         state["need_task_extract"] = True
         state["need_rag"] = True
         state["need_general_answer"] = False
+    
+    elif intent == "notion_save":
+        state["need_notion_save"] = True
+        state["need_general_answer"] = False
 
-    # 6. assistant 메시지 DB 저장
+    else:
+        state["need_general_answer"] = True
+
+    # 7. assistant 답변 DB 저장
     insert_message(
         conversation_id=request.room_id,
         role="assistant",
         content=answer
     )
 
-    # 7. 최종 응답 반환
+    # 8. 최종 응답 반환
     return ChatResponseSchema(
         room_id=state["room_id"],
         answer=answer,
