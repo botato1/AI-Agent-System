@@ -4,6 +4,7 @@ from pathlib import Path
 
 from backend.core.config import settings
 
+DB_PATH = Path(settings.SQLITE_DB_PATH)
 
 # SQLite DB 연결을 관리하는 함수
 def get_connection():
