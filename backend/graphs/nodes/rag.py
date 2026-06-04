@@ -1,13 +1,28 @@
+import asyncio
 from backend.schemas.agent_schema import AgentState
+from backend.services.rag_service import rag_service
 
 
 def rag_node(state: AgentState) -> AgentState:
     user_message = state["user_message"]
 
-    # TODO: ChromaDB에서 관련 문서 검색 로직 (rag 모듈 완성 후 연결)
-    # 지금은 빈 컨텍스트로 반환
-    rag_context = "관련 문서 없음"
-    sources = []
+    try:
+        result = asyncio.run(rag_service.retrieve_relevant_knowledge(
+            query=user_message,
+            top_k=5
+        ))
+
+        if result["status"] == "success" and result["count"] > 0:
+            rag_context = "\n\n".join([doc["content"] for doc in result["data"]])
+            sources = [{"title": doc["title"], "score": doc["score"]} for doc in result["data"]]
+        else:
+            rag_context = ""
+            sources = []
+
+    except Exception as e:
+        print(f"[rag_node 에러]: {str(e)}")
+        rag_context = ""
+        sources = []
 
     return {
         **state,
