@@ -7,7 +7,7 @@ load_dotenv()
 llm = ChatOllama(model="qwen2.5:7b", temperature=0.7, base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"))
 
 def answer_node(state: AgentState) -> AgentState:
-    user_message = state["user_message"]
+    user_message = state.get("user_message", "")
     memory_context = state.get("memory_context", "")
     rag_context = state.get("rag_context", "")
     tasks = state.get("tasks", [])

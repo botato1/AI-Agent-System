@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from backend.schemas.agent_schema import AgentState
 from backend.schemas.notion_schema import NotionSaveRequest
 from backend.schemas.task_schema import TaskItemSchema
@@ -15,6 +17,28 @@ def _convert_tasks(tasks: list) -> list[TaskItemSchema]:
 
     return converted_tasks
 
+# created_at이 비어 있을 때 사용할 기본 날짜 생성
+def _get_created_at(created_at: str | None) -> str:
+    if created_at:
+        return created_at
+
+    return datetime.now().date().isoformat()
+
+
+# NotionSaveResponse를 dict로 변환
+def _to_dict(result):
+    if hasattr(result, "model_dump"):
+        return result.model_dump()
+
+    if isinstance(result, dict):
+        return result
+
+    return {
+        "status": "error",
+        "notion_url": None,
+        "error": "Notion 저장 결과 형식을 변환할 수 없습니다."
+    }
+
 # LangGraph에서 Notion 저장을 담당하는 노드
 def notion_node(state: AgentState) -> AgentState:
 
@@ -30,13 +54,14 @@ def notion_node(state: AgentState) -> AgentState:
             **state,
             "notion_result": notion_result,
             "current_step": "notion_node",
+            "error": None,
         }
 
     try:
         room_id = state.get("room_id", "")
         user_message = state.get("user_message", "")
         source = state.get("source", "text")
-        created_at = state.get("created_at", "")
+        created_at = _get_created_at(state.get("created_at"))
         summary = state.get("summary")
         tasks = state.get("tasks", [])
         document_json = state.get("document_json") or {}
@@ -70,11 +95,13 @@ def notion_node(state: AgentState) -> AgentState:
         )
 
         result = save_to_notion(notion_request)
+        notion_result = _to_dict(result)
 
         return {
             **state,
-            "notion_result": result.model_dump(),
+            "notion_result": notion_result,
             "current_step": "notion_node",
+            "error": notion_result.get("error")
         }
 
     except Exception as e:
