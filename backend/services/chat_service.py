@@ -46,6 +46,37 @@ def create_initial_state(request: ChatRequest) -> AgentState:
         "error": None,
     }
 
+# AgentState를 프론트 응답 형식으로 반환하는 함수
+# 현재는 ollama_service 결과를 함께 사용하고 나중에 LangGraph 결과 state만 받아도 응답을 만들 수 있도록 분리
+def build_chat_response(state: AgentState, ollama_result: dict | None = None) -> ChatResponseSchema:
+    ollama_result = ollama_result or {}
+
+    return ChatResponseSchema(
+        room_id=state.get("room_id", ""),
+        answer=state.get("final_answer") or "응답을 생성하지 못했습니다.",
+        summary=state.get("summary"),
+        tasks=state.get("tasks", []),
+        sources=state.get("sources", []),
+        notion_result=state.get("notion_result"),
+        graph_data={
+            "current_step": state.get("current_step"),
+            "question_type": state.get("question_type"),
+            "need_general_answer": state.get("need_general_answer"),
+            "need_memory": state.get("need_memory"),
+            "need_rag": state.get("need_rag"),
+            "need_task_extract": state.get("need_task_extract"),
+            "need_notion_save": state.get("need_notion_save"),
+            "ollama": {
+                "status": ollama_result.get("status"),
+                "original_input": ollama_result.get("original_input"),
+                "normalized_input": ollama_result.get("normalized_input"),
+                "intent": ollama_result.get("intent"),
+                "sources": ollama_result.get("sources", []),
+                "error": ollama_result.get("error"),
+            }
+        },
+        error=state.get("error"),
+    )
 
 # 채팅 요청을 처리하는 함수
 async def handle_chat(request: ChatRequest) -> ChatResponseSchema:
@@ -104,28 +135,4 @@ async def handle_chat(request: ChatRequest) -> ChatResponseSchema:
     )
 
     # 8. 최종 응답 반환
-    return ChatResponseSchema(
-        room_id=state["room_id"],
-        answer=answer,
-        summary=state["summary"],
-        tasks=state["tasks"],
-        sources=[],
-        notion_result=state["notion_result"],
-        graph_data={
-            "current_step": state["current_step"],
-            "question_type": state["question_type"],
-            "need_general_answer": state["need_general_answer"],
-            "need_memory": state["need_memory"],
-            "need_rag": state["need_rag"],
-            "need_task_extract": state["need_task_extract"],
-            "need_notion_save": state["need_notion_save"],
-            "ollama": {
-                "status": ollama_result.get("status"),
-                "original_input": ollama_result.get("original_input"),
-                "normalized_input": ollama_result.get("normalized_input"),
-                "intent": ollama_result.get("intent"),
-                "sources": sources,
-            }
-        },
-        error=error,
-    )
+    return build_chat_response(state, ollama_result)
