@@ -6,6 +6,7 @@ from backend.schemas.response_schema import ChatResponseSchema
 from backend.schemas.agent_schema import AgentState
 from backend.db.crud import insert_message
 from backend.services.ollama_service import ollama_service
+from backend.graphs.agent_graph import agent_graph
 
 # ChatRequest를 LangGraph에서 사용할 AgentState로 변환하는 함수
 def create_initial_state(request: ChatRequest) -> AgentState:
@@ -38,6 +39,7 @@ def create_initial_state(request: ChatRequest) -> AgentState:
         "summary": None,
         "tasks": [],
         "final_answer": None,
+        "save_target_content": None,
 
         # 6. Notion / Graph / 오류 결과
         "notion_result": None,
@@ -46,17 +48,54 @@ def create_initial_state(request: ChatRequest) -> AgentState:
         "error": None,
     }
 
+def normalize_sources(sources: list | None) -> list[dict]:
+    """
+    sources가 문자열 리스트 또는 dict 리스트로 들어와도
+    ChatResponseSchema의 SourceSchema 형식에 맞게 변환한다.
+    """
+    if not sources:
+        return []
+
+    normalized_sources = []
+
+    for idx, source in enumerate(sources):
+        # source가 이미 dict인 경우
+        if isinstance(source, dict):
+            normalized_sources.append({
+                "id": source.get("id") or source.get("chroma_id") or f"source_{idx + 1}",
+                "source": source.get("source") or source.get("title") or "unknown",
+                "title": source.get("title") or source.get("source") or f"source_{idx + 1}",
+                "score": source.get("score"),
+            })
+
+        # source가 문자열인 경우
+        elif isinstance(source, str):
+            normalized_sources.append({
+                "id": f"source_{idx + 1}",
+                "source": source,
+                "title": source,
+                "score": None,
+            })
+
+    return normalized_sources
+
 # AgentState를 프론트 응답 형식으로 반환하는 함수
 # 현재는 ollama_service 결과를 함께 사용하고 나중에 LangGraph 결과 state만 받아도 응답을 만들 수 있도록 분리
-def build_chat_response(state: AgentState, ollama_result: dict | None = None) -> ChatResponseSchema:
+def build_chat_response(
+    state: AgentState,
+    ollama_result: dict | None = None
+) -> ChatResponseSchema:
     ollama_result = ollama_result or {}
+
+    raw_sources = state.get("sources") or ollama_result.get("sources", [])
+    sources = normalize_sources(raw_sources)
 
     return ChatResponseSchema(
         room_id=state.get("room_id", ""),
-        answer=state.get("final_answer") or "응답을 생성하지 못했습니다.",
+        answer=state.get("final_answer") or ollama_result.get("answer") or "",
         summary=state.get("summary"),
         tasks=state.get("tasks", []),
-        sources=state.get("sources", []),
+        sources=sources,
         notion_result=state.get("notion_result"),
         graph_data={
             "current_step": state.get("current_step"),
@@ -77,6 +116,10 @@ def build_chat_response(state: AgentState, ollama_result: dict | None = None) ->
         },
         error=state.get("error"),
     )
+
+# AgentState를 LangGraph에 전달해서 실행하는 함수
+def run_agent_graph(state: AgentState) -> AgentState:
+    return agent_graph.invoke(state)
 
 # 채팅 요청을 처리하는 함수
 async def handle_chat(request: ChatRequest) -> ChatResponseSchema:
