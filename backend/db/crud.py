@@ -5,7 +5,6 @@ from backend.db.database import DB_PATH, get_connection  # database.py에 정의
 
 
 def get_utc_now() -> str:
-    """ISO 8601 UTC 포맷의 현재 시각 반환 (예: 2026-06-02T16:58:50Z)"""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 # 첫 사용자 메시지를 기반으로 채팅방 제목을 자동 생성
@@ -20,17 +19,14 @@ def make_conversation_title(content: str, max_length: int = 30) -> str:
         return content[:max_length] + "..."
 
     return content
-
 # ==========================================
-# 1. conversations (채팅방 세션) CRUD
+# 1. conversations CRUD
 # ==========================================
 
 def create_conversation(title: str) -> str:
-    """채팅방 처음 생성될 때 INSERT 후 생성된 ID 반환"""
     conv_id = str(uuid.uuid4())
     now = get_utc_now()
-    
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO conversations (id, title, created_at, updated_at)
@@ -40,12 +36,9 @@ def create_conversation(title: str) -> str:
     conn.close()
     return conv_id
 
-
 def update_conversation_timestamp(conversation_id: str):
-    """메시지가 올 때마다 updated_at을 현재 시간으로 UPDATE"""
     now = get_utc_now()
-    
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
         UPDATE conversations SET updated_at = ? WHERE id = ?
@@ -53,9 +46,20 @@ def update_conversation_timestamp(conversation_id: str):
     conn.commit()
     conn.close()
 
+def get_conversations() -> list:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, title, created_at, updated_at
+        FROM conversations
+        ORDER BY updated_at DESC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
 
 # ==========================================
-# 2. messages (전체 채팅 메시지 로그) CRUD
+# 2. messages CRUD
 # ==========================================
 
 def insert_message(conversation_id: str, role: str, content: str) -> str:
@@ -102,11 +106,9 @@ def insert_message(conversation_id: str, role: str, content: str) -> str:
     return msg_id
 
     '''
-    """메시지 전송/수신마다 INSERT + 대화방 Last Update 최신화"""
     msg_id = str(uuid.uuid4())
     now = get_utc_now()
-    
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO messages (id, conversation_id, role, content, created_at)
@@ -114,15 +116,12 @@ def insert_message(conversation_id: str, role: str, content: str) -> str:
     """, (msg_id, conversation_id, role, content, now))
     conn.commit()
     conn.close()
-    
-    # 메시지 추가 시 세션 시간 자동 업데이트
     update_conversation_timestamp(conversation_id)
     return msg_id
     '''
 
 def get_messages(conversation_id: str) -> list:
-    """LangGraph 컨텍스트 전달 및 화면 렌더링용 SELECT ORDER BY created_at ASC"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT id, role, content, created_at FROM messages 
@@ -131,18 +130,15 @@ def get_messages(conversation_id: str) -> list:
     """, (conversation_id,))
     rows = cursor.fetchall()
     conn.close()
-    return rows
-
+    return [dict(row) for row in rows]
 
 # ==========================================
-# 3. summaries (채팅방별 컨텍스트 요약본) CRUD
+# 3. summaries CRUD
 # ==========================================
 
 def insert_summary(conversation_id: str, summary_text: str, token_count: int = None):
-    """메시지가 일정 토큰 초과 시 자동 요약본 INSERT"""
     now = get_utc_now()
-    
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO summaries (conversation_id, summary, token_count, created_at)
@@ -151,33 +147,27 @@ def insert_summary(conversation_id: str, summary_text: str, token_count: int = N
     conn.commit()
     conn.close()
 
-
 def get_latest_summary(conversation_id: str) -> dict:
-    """최신 요약 1건 SELECT (없으면 None)"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT summary, token_count, created_at FROM summaries 
-        WHERE conversation_id = ? 
+        SELECT summary, token_count, created_at FROM summaries
+        WHERE conversation_id = ?
         ORDER BY created_at DESC LIMIT 1
     """, (conversation_id,))
     row = cursor.fetchone()
     conn.close()
-    
     if row:
-        return {"summary": row[0], "token_count": row[1], "created_at": row[2]}
+        return dict(row)
     return None
 
-
 # ==========================================
-# 4. important_facts (유저 개인화 정보 저장고) CRUD
+# 4. important_facts CRUD
 # ==========================================
 
 def insert_fact(conversation_id: str, fact_text: str, category: str = "환경"):
-    """Agent가 대화 중 개인화 정보 감지 시 INSERT (동현 님 need_memory 트리거 연동)"""
     now = get_utc_now()
-    
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO important_facts (conversation_id, fact, category, created_at)
@@ -186,37 +176,106 @@ def insert_fact(conversation_id: str, fact_text: str, category: str = "환경"):
     conn.commit()
     conn.close()
 
-
 def get_all_facts(conversation_id: str) -> list:
-    """새 대화 시작 시 과거 맥락 로드 및 개인화 응답 생성용 SELECT (최신순)"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT fact, category, created_at FROM important_facts 
-        WHERE conversation_id = ? 
+        SELECT fact, category, created_at FROM important_facts
+        WHERE conversation_id = ?
+        ORDER BY created_at DESC
+    """, (conversation_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+# ==========================================
+# 5. documents CRUD
+# ==========================================
+
+def save_document_metadata(doc: dict) -> str:
+    """문서 처리 결과를 SQLite에 저장"""
+    doc_id = doc.get("id", str(uuid.uuid4()))
+    now = get_utc_now()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO documents
+        (id, conversation_id, title, type, source, file_path, summary, status, notion_url, error, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        doc_id,
+        doc.get("conversation_id", ""),
+        doc.get("title", ""),
+        doc.get("type", "document"),
+        doc.get("source", ""),
+        doc.get("file_path", ""),
+        doc.get("summary", ""),
+        doc.get("status", "processed"),
+        doc.get("notion_url", ""),
+        doc.get("error", ""),
+        now
+    ))
+    conn.commit()
+    conn.close()
+    return doc_id
+
+def get_documents(conversation_id: str) -> list:
+    """채팅방 기준 문서 목록 조회"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, title, type, source, summary, status, created_at
+        FROM documents
+        WHERE conversation_id = ?
+        ORDER BY created_at DESC
+    """, (conversation_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+# ==========================================
+# 6. tasks CRUD
+# ==========================================
+
+def save_tasks(tasks: list, document_id: str, conversation_id: str):
+    """액션아이템 목록 저장"""
+    now = get_utc_now()
+    conn = get_connection()
+    cursor = conn.cursor()
+    for task in tasks:
+        task_id = task.get("task_id", str(uuid.uuid4()))
+        cursor.execute("""
+            INSERT INTO tasks
+            (id, document_id, conversation_id, task, assignee, deadline, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            task_id,
+            document_id,
+            conversation_id,
+            task.get("task", ""),
+            task.get("assignee", ""),
+            task.get("deadline", ""),
+            task.get("status", "todo"),
+            now
+        ))
+    conn.commit()
+    conn.close()
+
+def get_tasks(conversation_id: str) -> list:
+    """채팅방 기준 할일 목록 조회"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, task, assignee, deadline, status, created_at
+        FROM tasks
+        WHERE conversation_id = ?
         ORDER BY created_at DESC
     """, (conversation_id,))
     rows = cursor.fetchall()
     conn.close()
     return rows
 
-# ==========================================
-#   5. 대화방 목록 전체 조회(최신 수정일 기준으로 정렬)
-# ==========================================
-def get_conversations() -> list:
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
 
-    cursor.execute("""
-        SELECT id, title, created_at, updated_at
-        FROM conversations
-        ORDER BY updated_at DESC
-    """)
-
-    rows = cursor.fetchall()
-    conn.close()
-
-    return rows
 
 # 6. 채팅방과 해당 채팅방의 메시지를 삭제
 def delete_conversation(room_id: str) -> bool:
