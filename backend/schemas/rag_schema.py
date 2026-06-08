@@ -49,8 +49,6 @@ class ChromaSearchResultSchema(BaseModel):
     score: Optional[float] = None
 
 
-class RagSearchResponseSchema(BaseModel):
-    results: List[ChromaSearchResultSchema]
 
 # Ollama 요청 구조
 class OllamaRequest(BaseModel):
