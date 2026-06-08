@@ -24,16 +24,12 @@ export default function ConfidenceBar({ confidence, onReview }: Props) {
         </div>
         <p className="text-xs text-gray-400 mt-1.5">{msg}</p>
       </div>
-      {confidence < 90 && (
-        <button
-          onClick={onReview}
-          className={`flex-shrink-0 text-xs text-white px-4 py-2 rounded-lg transition ${
-            confidence >= 70 ? 'bg-amber-500 hover:bg-amber-600' : 'bg-red-500 hover:bg-red-600'
-          }`}
-        >
-          재검토 요청
-        </button>
-      )}
+      <button
+  onClick={onReview}
+  className="flex-shrink-0 text-xs text-white px-4 py-2 rounded-lg transition bg-blue-500 hover:bg-blue-600"
+>
+  재검토 요청
+</button>
     </div>
   )
 }

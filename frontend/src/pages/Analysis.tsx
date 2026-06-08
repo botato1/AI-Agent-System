@@ -1,10 +1,14 @@
 import { Document, Packer, Paragraph, TextRun, HeadingLevel } from 'docx'
 import { saveAs } from 'file-saver'
+import { jsPDF } from 'jspdf'
+
 import { NanumGothicBase64 } from '../fonts/NanumGothic'
 import { useToast } from '../App'
+
 import { useState } from 'react'
+
 import { ArrowLeft, Download, Share2 } from 'lucide-react'
-import jsPDF from 'jspdf'
+
 import TabSummary from '../components/Analysis/TabSummary'
 import TabOriginal from '../components/Analysis/TabOriginal'
 import ConfidenceBar from '../components/Analysis/ConfidenceBar'
