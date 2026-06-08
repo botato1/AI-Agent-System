@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Upload, FileText, CheckCircle, Circle, Loader, AlertCircle } from 'lucide-react'
 
+const BASE_URL = 'http://192.168.0.235:8000'
+
 const steps = [
   { id: 1, label: '입력 처리', desc: '음성/텍스트/PDF/이미지 분석', detail: 'Whisper STT · PyMuPDF · Tesseract OCR' },
   { id: 2, label: 'Agent 흐름 제어', desc: 'LangGraph 노드 분기 처리', detail: 'LangGraph · 입력 유형별 라우팅' },
@@ -25,19 +27,57 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
   const [isDragging, setIsDragging] = useState(false)
   const [logs, setLogs] = useState<string[]>([])
   const [isRunning, setIsRunning] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
 
   const addLog = (msg: string) => {
     setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`])
   }
 
-  const startPipeline = (fileName: string) => {
-    setFile(fileName)
+  const startPipeline = async (selectedFile: File) => {
+    setFile(selectedFile.name)
     setStatuses(Array(6).fill('wait'))
     setLogs([])
-    setCurrentStep(0)
+    setUploadError(null)
     setIsRunning(true)
-  }
 
+    addLog('채팅방 생성 중...')
+        try {
+      // 1. 채팅방 생성
+      const roomRes = await fetch(`${BASE_URL}/api/conversations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: selectedFile.name }),
+      })
+      if (!roomRes.ok) throw new Error('채팅방 생성 실패')
+      const roomData = await roomRes.json()
+      const roomId = roomData.room_id
+      addLog(`채팅방 생성 완료 (${roomId})`)
+
+      // 2. 문서 업로드
+      addLog('문서 업로드 중...')
+      const formData = new FormData()
+      formData.append('file', selectedFile)
+      formData.append('room_id', roomId)
+
+      const uploadRes = await fetch(`${BASE_URL}/api/documents/upload`, {
+        method: 'POST',
+        body: formData,
+      })
+      if (!uploadRes.ok) throw new Error('문서 업로드 실패')
+      const uploadData = await uploadRes.json()
+      addLog(`업로드 완료: ${uploadData.filename}`)
+
+      // 3. 파이프라인 시작
+      setCurrentStep(0)
+
+    } catch (err: any) {
+      console.error('업로드 오류:', err)
+      setUploadError(err.message)
+      addLog(`오류: ${err.message}`)
+      setIsRunning(false)
+    }
+  }
+  
   useEffect(() => {
     if (currentStep < 0 || currentStep >= 6) {
       if (currentStep === 6) setIsRunning(false)
@@ -63,7 +103,12 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
 
 useEffect(() => {
   if (reviewFileName) {
-    startPipeline(reviewFileName)
+    addLog(`재검토 요청: ${reviewFileName}`)
+    setFile(reviewFileName)
+    setStatuses(Array(6).fill('wait'))
+    setLogs([])
+    setCurrentStep(0)
+    setIsRunning(true)
   }
 }, [reviewFileName])
 
@@ -71,12 +116,12 @@ useEffect(() => {
     e.preventDefault()
     setIsDragging(false)
     const droppedFile = e.dataTransfer.files[0]
-    if (droppedFile) startPipeline(droppedFile.name)
+    if (droppedFile) startPipeline(droppedFile)
   }
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0]
-    if (selected) startPipeline(selected.name)
+    if (selected) startPipeline(selected)
   }
 
  const reset = () => {
@@ -85,6 +130,7 @@ useEffect(() => {
   setCurrentStep(-1)
   setLogs([])
   setIsRunning(false)
+  setUploadError(null)
   onClearReview()
 }
 
@@ -97,7 +143,7 @@ useEffect(() => {
 
   const doneCount = statuses.filter(s => s === 'done').length
 
-  return (
+   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -114,14 +160,21 @@ useEffect(() => {
       <div className="grid grid-cols-2 gap-6">
         <div className="flex flex-col gap-4">
           {reviewFileName && !file && (
-  <div className="flex items-center justify-between bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl px-4 py-3">
-    <div className="flex items-center gap-2">
-      <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">🔄 재검토 중</span>
-      <span className="text-xs text-amber-500 dark:text-amber-300">{reviewFileName}</span>
-    </div>
-    <button onClick={onClearReview} className="text-xs text-amber-400 hover:text-amber-600">취소</button>
-  </div>
-)}
+            <div className="flex items-center justify-between bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl px-4 py-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">🔄 재검토 중</span>
+                <span className="text-xs text-amber-500 dark:text-amber-300">{reviewFileName}</span>
+              </div>
+              <button onClick={onClearReview} className="text-xs text-amber-400 hover:text-amber-600">취소</button>
+            </div>
+          )}
+
+          {uploadError && (
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl px-4 py-3">
+              <p className="text-xs text-red-500">❌ {uploadError}</p>
+            </div>
+          )}
+
           {!file ? (
             <div
               onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
@@ -137,7 +190,7 @@ useEffect(() => {
                 <Upload className="text-blue-400" size={24} />
               </div>
               <p className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">파일을 드래그하거나 클릭해서 업로드</p>
-              <p className="text-xs text-gray-400 mb-4">PDF ·  DOCX · TXT · 이미지 지원</p>
+              <p className="text-xs text-gray-400 mb-4">PDF · DOCX · TXT · 이미지 지원</p>
               <label className="bg-blue-600 text-white text-xs px-4 py-2 rounded-lg cursor-pointer hover:bg-blue-700">
                 파일 선택
                 <input type="file" className="hidden" onChange={handleFileInput} accept=".pdf,.docx,.txt,.png,.jpg" />
@@ -188,7 +241,7 @@ useEffect(() => {
         </div>
 
         <div className="flex flex-col gap-4">
-           <div className="bg-gray-900 rounded-xl p-4 flex-1 min-h-96"> 
+          <div className="bg-gray-900 rounded-xl p-4 flex-1 min-h-96">
             <div className="flex items-center gap-2 mb-3">
               <div className="w-3 h-3 rounded-full bg-red-400" />
               <div className="w-3 h-3 rounded-full bg-yellow-400" />
@@ -200,7 +253,7 @@ useEffect(() => {
                 <p className="text-xs text-gray-600">파일을 업로드하면 로그가 표시됩니다...</p>
               ) : (
                 logs.map((log, i) => (
-                  <p key={i} className={`text-xs font-mono ${log.includes('완료') ? 'text-green-400' : 'text-gray-300'}`}>
+                  <p key={i} className={`text-xs font-mono ${log.includes('완료') ? 'text-green-400' : log.includes('오류') ? 'text-red-400' : 'text-gray-300'}`}>
                     {log}
                   </p>
                 ))
@@ -212,10 +265,7 @@ useEffect(() => {
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-blue-100 dark:border-blue-800 p-4">
               <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">✅ 처리 완료</h3>
               <button
-                onClick={() => {
-                  console.log('버튼 클릭됨!')
-                  onGoToAnalysis()
-                }}
+                onClick={onGoToAnalysis}
                 className="w-full text-xs text-white bg-blue-600 px-3 py-2 rounded-lg hover:bg-blue-700"
               >
                 결과 보러가기 →
