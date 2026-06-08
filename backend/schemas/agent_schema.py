@@ -30,6 +30,9 @@ class AgentState(TypedDict):
     tasks: List[dict]
     final_answer: Optional[str]
 
+    # Notion 저장 시 실제로 저장할 내용
+    save_target_content: str | None
+
     # 6. Notion / Graph / 오류 결과
     notion_result: Optional[dict]
     graph_data: Optional[dict]

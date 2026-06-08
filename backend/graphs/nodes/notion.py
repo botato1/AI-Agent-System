@@ -58,6 +58,9 @@ def notion_node(state: AgentState) -> AgentState:
         }
 
     try:
+        final_answer = state.get("final_answer")
+        memory_context = state.get("memory_context")
+
         room_id = state.get("room_id", "")
         user_message = state.get("user_message", "")
         source = state.get("source", "text")
@@ -67,7 +70,13 @@ def notion_node(state: AgentState) -> AgentState:
         document_json = state.get("document_json") or {}
 
         title = document_json.get("title") or user_message[:50] or "AI Agent 저장 결과"
-        content = document_json.get("content") or user_message
+        content = (
+            final_answer
+            or summary
+            or memory_context
+            or document_json.get("content")
+            or user_message
+        )
         document_type = document_json.get("type") or "meeting"
         language = document_json.get("language") or "ko"
         tags = document_json.get("tags") or []
