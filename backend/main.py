@@ -6,12 +6,22 @@ from backend.routers.rag_router import router as rag_router
 from backend.routers.document_router import router as document_router
 from backend.routers.notion_router import router as notion_router
 from backend.routers.agent_router import router as agent_router
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(
     title="AI-Agent-System Backend",
     description="FastAPI backend for AI Agent System",
     version="0.1.0"
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # 서버 실행 시 SQLite DB 테이블 자동 생성
 init_db()
 
