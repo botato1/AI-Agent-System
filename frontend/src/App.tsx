@@ -42,7 +42,7 @@ export default function App() {
 
   const showToast = (message: string, type: ToastType = 'info') => {
     setToast({ message, type })
-    setTimeout(() => setToast(null), 2500)
+    setTimeout(() => setToast(null), 1500)
   }
 
   const renderPage = () => {
@@ -64,7 +64,7 @@ case 'analysis': return (
 )
       case 'tasks': return <Tasks />
       case 'settings': return <Settings />
-      case 'graph': return <Graph />
+      case 'graph': return <Graph onGoToAnalysis={() => setActivePage('analysis')} />
       case 'documents': return (
   <Documents
     selectedDocId={selectedDocId}
@@ -105,18 +105,30 @@ case 'voice': return (
           {renderPage()}
         </main>
 
-        {toast && (
-          <div className={`fixed top-6 left-1/2 -translate-x-1/2 flex items-center gap-2 px-5 py-3 rounded-xl shadow-lg text-sm font-medium z-50 transition-all ${
-            toast.type === 'success' ? 'bg-gray-800 text-white' :
-            toast.type === 'error' ? 'bg-red-500 text-white' :
-            'bg-blue-500 text-white'
-          }`}>
-            {toast.type === 'success' && <span>✓</span>}
-            {toast.type === 'error' && <span>✕</span>}
-            {toast.type === 'info' && <span>ℹ</span>}
-            {toast.message}
-          </div>
-        )}
+{toast && (
+  <div className={`fixed top-6 left-1/2 -translate-x-1/2 flex items-center gap-3 px-5 py-3 rounded-2xl shadow-lg text-sm font-medium z-50 transition-all ${
+    toast.type === 'success' ? 'bg-[#D8F0DA]/90 text-gray-700' :
+    toast.type === 'error' ? 'bg-red-500/90 text-white' :
+    'bg-blue-500/70 text-white'
+  }`}>
+    {toast.type === 'success' && (
+      <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">
+        <span className="text-white text-xs">✓</span>
+      </div>
+    )}
+    {toast.type === 'error' && (
+      <div className="w-6 h-6 rounded-full bg-red-600 flex items-center justify-center flex-shrink-0">
+        <span className="text-white text-xs">✕</span>
+      </div>
+    )}
+    {toast.type === 'info' && (
+      <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center flex-shrink-0">
+        <span className="text-white text-xs">ℹ</span>
+      </div>
+    )}
+    {toast.message}
+  </div>
+)}
       </div>
     </ToastContext.Provider>
   )
