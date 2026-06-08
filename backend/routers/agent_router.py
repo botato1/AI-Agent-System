@@ -59,6 +59,7 @@ def run_agent(user_message: str, room_id: str = "test_room"):
         "question_type": result_state.get("question_type"),
         "final_answer": result_state.get("final_answer"),
         "memory_context": result_state.get("memory_context"),
+        "save_target_content": result_state.get("save_target_content"),
         "rag_context": result_state.get("rag_context"),
         "tasks": result_state.get("tasks", []),
         "sources": result_state.get("sources", []),

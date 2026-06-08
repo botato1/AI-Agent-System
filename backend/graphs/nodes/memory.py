@@ -7,6 +7,7 @@ def memory_node(state: AgentState) -> AgentState:
         return {
             **state,
             "memory_context": state.get("memory_context") or "",
+            "save_target_content":state.get("save_target_content"),
             "current_step": "memory_node",
             "error": None,
         }
@@ -15,15 +16,32 @@ def memory_node(state: AgentState) -> AgentState:
 
     try:
         messages = get_messages(room_id)
+        memory_context = ""
+        save_target_content = None
+
         if messages:
-            memory_context = "\n".join([f"{row[1]}: {row[2]}" for row in messages])
-        else:
-            memory_context = ""
+            memory_lines = []
+
+            for row in messages:
+                # row[1] = role
+                # row[2] = content
+                role = row[1]
+                content = row[2]
+
+                memory_lines.append(f"{role}: {content}")
+
+                # 가장 최근 assistant 답변을 저장 대상으로 사용
+                if role == "assistant":
+                    save_target_content = content
+
+            memory_context = "\n".join(memory_lines)
+
         return {
             **state,
             "memory_context": memory_context,
-            "current_step" : "memory_node",
-            "error" : None
+            "save_target_content": save_target_content,
+            "current_step": "memory_node",
+            "error": None,
         }
 
     except Exception as e:
@@ -32,6 +50,7 @@ def memory_node(state: AgentState) -> AgentState:
         return {
             **state,
             "memory_context": "",
+            "save_target_content" : None,
             "current_step" : "memory_node",
             "error" : str(e)
         }

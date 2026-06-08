@@ -60,6 +60,7 @@ def notion_node(state: AgentState) -> AgentState:
     try:
         final_answer = state.get("final_answer")
         memory_context = state.get("memory_context")
+        save_target_content = state.get("save_target_content")
 
         room_id = state.get("room_id", "")
         user_message = state.get("user_message", "")
@@ -71,7 +72,8 @@ def notion_node(state: AgentState) -> AgentState:
 
         title = document_json.get("title") or user_message[:50] or "AI Agent 저장 결과"
         content = (
-            final_answer
+            save_target_content
+            or final_answer
             or summary
             or memory_context
             or document_json.get("content")
