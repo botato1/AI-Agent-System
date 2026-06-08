@@ -11,6 +11,18 @@ from backend.modules.rag.chroma_client import search_hybrid
 def get_utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+def is_rag_result_relevant(rag_result: dict, min_score: float = 0.5) -> bool:
+    """RAG 검색 결과가 충분히 관련있는지 판단"""
+    if rag_result.get("status") != "success":
+        return False
+    if rag_result.get("count", 0) == 0:
+        return False
+    data = rag_result.get("data", [])
+    if not data:
+        return False
+    top_score = data[0].get("score", 0)
+    return top_score >= min_score
+
 class RAGService:
 
     @staticmethod
@@ -23,17 +35,17 @@ class RAGService:
         """
         하이브리드 검색 (BGE-M3 벡터 + 키워드)
         → 상대평가 필터링
-        → 공통키 규격 맞춰서 반환
+        → 공통키 + 문서 식별 필드 반환
 
         filter 예시
-        → {"type": "meeting"}     회의록만 검색
-        → {"language": "ko"}      한국어 문서만
-        → {"source": "pdf"}       PDF만
+        → {"type": "meeting"}           회의록만
+        → {"document_id": "uuid"}       특정 문서만
+        → {"filename": "회의록.pdf"}    특정 파일만
+        → {"upload_context": "document"} 문서 업로드만
         """
         print(f"[RAG Service] 쿼리: '{query}'")
 
         try:
-            # 1. 하이브리드 검색
             raw_results = search_hybrid(
                 query_text=query,
                 top_k=top_k,
@@ -49,7 +61,6 @@ class RAGService:
                     "error": None
                 }
 
-            # 2. 상대평가 필터링
             max_score = raw_results[0]["score"]
             min_absolute_bound = 0.1
             processed_documents = []
@@ -64,7 +75,6 @@ class RAGService:
                 meta = res["metadata"]
 
                 processed_documents.append({
-                    # 공통키 규격
                     "id": res["id"],
                     "content": res["document"],
                     "title": meta.get("title", "제목 없음"),
@@ -78,9 +88,13 @@ class RAGService:
                     "error": meta.get("error", ""),
                     "user_edited": meta.get("user_edited", False),
                     "tags": meta.get("tags", ""),
-                    # 승주 전용
                     "importance_score": meta.get("importance_score", 0),
                     "score": res["score"],
+                    "document_id": meta.get("document_id", ""),
+                    "filename": meta.get("filename", ""),
+                    "chunk_index": meta.get("chunk_index", 0),
+                    "upload_context": meta.get("upload_context", ""),
+                    "room_id": meta.get("room_id", ""),
                 })
 
             print(f"[RAG Service] 완료 → {len(processed_documents)}개 반환 (최고점: {max_score})")
