@@ -3,6 +3,14 @@ from backend.db.crud import get_messages
 
 
 def memory_node(state: AgentState) -> AgentState:
+    if not state.get("need_memory", False):
+        return {
+            **state,
+            "memory_context": state.get("memory_context") or "",
+            "current_step": "memory_node",
+            "error": None,
+        }
+    
     room_id = state.get("room_id", "")
 
     try:

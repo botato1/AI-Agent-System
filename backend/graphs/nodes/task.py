@@ -9,6 +9,14 @@ load_dotenv()
 llm = ChatOllama(model="qwen2.5:7b", temperature=0, base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"))
 
 def task_node(state: AgentState) -> AgentState:
+    # 할 일 추출이 필요 없으면 task_node 실행 건너뜀
+    if not state.get("need_task_extract", False):
+        return {
+            **state,
+            "tasks": state.get("tasks", []),
+            "current_step": "task_node",
+            "error": None,
+        }
     user_message = state.get("user_message", "")
     rag_context = state.get("rag_context", "")
     memory_context = state.get("memory_context", "")

@@ -4,6 +4,14 @@ from backend.services.rag_service import rag_service
 
 
 def rag_node(state: AgentState) -> AgentState:
+    if not state.get("need_rag", False):
+        return {
+            **state,
+            "rag_context": state.get("rag_context") or "",
+            "sources": state.get("sources", []),
+            "current_step": "rag_node",
+            "error": None,
+        }
     user_message = state.get("user_message", "")
 
     try:
