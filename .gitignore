@@ -9,3 +9,6 @@ test/
 
 # 자동 생성 저장소
 storage/
+
+# 업로드 원본 파일
+data/raw/
