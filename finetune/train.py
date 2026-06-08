@@ -6,7 +6,7 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 if str(BASE_DIR) not in sys.path:
     sys.path.append(str(BASE_DIR))
 
-MODEL_NAME = "Qwen/Qwen2.5-7B-Instruct"
+MODEL_NAME = r"C:\Users\bit\Desktop\AI-Agent-System\models\qwen_base"
 DATA_PATH = str(BASE_DIR / "data" / "finetune" / "train.jsonl")
 OUTPUT_DIR = str(BASE_DIR / "models" / "qwen2.5-7b-finetuned")
 MAX_SEQ_LENGTH = 2048
@@ -69,9 +69,9 @@ def train():
             gradient_accumulation_steps=GRAD_ACCUMULATION,
             num_train_epochs=EPOCHS,
             learning_rate=LEARNING_RATE,
-            fp16=True,
+            bf16=True,
             logging_steps=10,
-            save_steps=100,
+            save_steps=999999,
             warmup_ratio=0.1,
             lr_scheduler_type="cosine",
             optim="adamw_8bit",
