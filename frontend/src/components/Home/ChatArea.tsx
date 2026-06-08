@@ -26,8 +26,6 @@ export default function ChatArea() {
 
   return (
     <div className="flex-1 flex flex-col">
-
-      {/* 채팅 시작 전 인사말 */}
       {!started && (
         <div className="flex-1 flex flex-col items-center justify-center gap-6">
           <div className="text-center">
@@ -38,8 +36,6 @@ export default function ChatArea() {
               회의록 분석, 업무 정리, 일정 관리 등 무엇이든 물어보세요
             </p>
           </div>
-
-          {/* 추천 질문 카드 */}
           <div className="grid grid-cols-2 gap-3 w-full max-w-lg">
             {suggestions.map((s, i) => (
               <button
@@ -54,7 +50,6 @@ export default function ChatArea() {
         </div>
       )}
 
-      {/* 채팅 시작 후 메시지 */}
       {started && (
         <div className="flex-1 overflow-y-auto flex flex-col gap-4 mb-4 pr-1">
           {messages.map((msg) => (
@@ -80,7 +75,6 @@ export default function ChatArea() {
         </div>
       )}
 
-      {/* 추천 질문 (채팅 시작 후) */}
       {started && (
         <div className="flex gap-2 mb-3 flex-wrap">
           {suggestions.map((s, i) => (
@@ -95,7 +89,6 @@ export default function ChatArea() {
         </div>
       )}
 
-      {/* 입력창 */}
       <div className="flex gap-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-2xl p-2">
         <textarea
           value={input}
@@ -119,7 +112,6 @@ export default function ChatArea() {
           <Send size={14} className={input.trim() ? 'text-white' : 'text-gray-300'} />
         </button>
       </div>
-
     </div>
   )
 }
