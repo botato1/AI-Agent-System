@@ -13,7 +13,7 @@ def rag_node(state: AgentState) -> AgentState:
         ))
 
         if result.get("status") == "success" and result.get("count", 0) > 0:
-            rrag_context = "\n\n".join([
+            rag_context = "\n\n".join([
                 doc.get("content", "")
                 for doc in result.get("data", [])
             ])
