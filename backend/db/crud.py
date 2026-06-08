@@ -8,6 +8,18 @@ def get_utc_now() -> str:
     """ISO 8601 UTC 포맷의 현재 시각 반환 (예: 2026-06-02T16:58:50Z)"""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+# 첫 사용자 메시지를 기반으로 채팅방 제목을 자동 생성
+def make_conversation_title(content: str, max_length: int = 30) -> str:
+
+    content = (content or "").strip().replace("\n", " ")
+
+    if not content:
+        return "새 채팅"
+
+    if len(content) > max_length:
+        return content[:max_length] + "..."
+
+    return content
 
 # ==========================================
 # 1. conversations (채팅방 세션) CRUD
@@ -50,6 +62,49 @@ def insert_message(conversation_id: str, role: str, content: str) -> str:
     """메시지 전송/수신마다 INSERT + 대화방 Last Update 최신화"""
     msg_id = str(uuid.uuid4())
     now = get_utc_now()
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    # 1. 채팅방이 이미 있는지 확인
+    cursor.execute("""
+        SELECT id FROM conversations
+        WHERE id = ?
+    """, (conversation_id,))
+
+    conversation = cursor.fetchone()
+
+    # 2. 채팅방이 없으면 자동 생성
+    if conversation is None:
+        title = make_conversation_title(content) if role == "user" else "새 채팅"
+
+        cursor.execute("""
+            INSERT INTO conversations (id, title, created_at, updated_at)
+            VALUES (?, ?, ?, ?)
+        """, (conversation_id, title, now, now))
+
+    # 3. 메시지 저장
+    cursor.execute("""
+        INSERT INTO messages (id, conversation_id, role, content, created_at)
+        VALUES (?, ?, ?, ?, ?)
+    """, (msg_id, conversation_id, role, content, now))
+
+    # 4. 채팅방 updated_at 갱신
+    cursor.execute("""
+        UPDATE conversations
+        SET updated_at = ?
+        WHERE id = ?
+    """, (now, conversation_id))
+
+    conn.commit()
+    conn.close()
+
+    return msg_id
+
+    '''
+    """메시지 전송/수신마다 INSERT + 대화방 Last Update 최신화"""
+    msg_id = str(uuid.uuid4())
+    now = get_utc_now()
     
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -63,7 +118,7 @@ def insert_message(conversation_id: str, role: str, content: str) -> str:
     # 메시지 추가 시 세션 시간 자동 업데이트
     update_conversation_timestamp(conversation_id)
     return msg_id
-
+    '''
 
 def get_messages(conversation_id: str) -> list:
     """LangGraph 컨텍스트 전달 및 화면 렌더링용 SELECT ORDER BY created_at ASC"""
