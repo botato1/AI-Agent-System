@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Home, CheckSquare, FolderOpen, Settings, Activity, GitFork, Moon, Sun, MessageSquare, ChevronLeft, ChevronRight, Mic } from 'lucide-react'
+
+const BASE_URL = 'http://192.168.0.235:8000'
 
 const menuItems = [
   { icon: Home, label: '홈', id: 'home' },
@@ -11,12 +13,12 @@ const menuItems = [
   { icon: Settings, label: '설정', id: 'settings' },
 ]
 
-const recentChats = [
-  { id: 1, title: '마케팅 전략 회의 요약' },
-  { id: 2, title: '담당자별 업무 정리' },
-  { id: 3, title: 'A/B 테스트 계획' },
-  { id: 4, title: '고객 미팅 후속 조치' },
-]
+interface Conversation {
+  room_id: string
+  title: string
+  created_at: string
+  updated_at: string
+}
 
 interface SidebarProps {
   activePage: string
@@ -25,16 +27,29 @@ interface SidebarProps {
   onToggleDark: () => void
   onChatSelect: (chatId: number) => void
   onCollapse: (v: boolean) => void
+  refreshKey?: number
+  onRoomSelect: (room_id: string) => void
 }
 
-export default function Sidebar({ activePage, onPageChange, isDark, onToggleDark, onChatSelect , onCollapse}: SidebarProps) {
+export default function Sidebar({ activePage, onPageChange, isDark, onToggleDark, onChatSelect, onCollapse, refreshKey, onRoomSelect }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false)
   const [chatCollapsed, setChatCollapsed] = useState(false)
+  const [recentChats, setRecentChats] = useState<Conversation[]>([])
+
+  const fetchChats = () => {
+    fetch(`${BASE_URL}/api/conversations`)
+      .then(r => r.json())
+      .then(data => setRecentChats(data.conversations ?? []))
+      .catch(err => console.error('채팅 목록 조회 실패:', err))
+  }
+
+  useEffect(() => {
+    fetchChats()
+  }, [refreshKey])
 
   return (
     <div className={`h-screen bg-white dark:bg-[#161616] border-r border-gray-100 dark:border-[#2a2a2a] flex flex-col fixed left-0 top-0 transition-all duration-300 ${collapsed ? 'w-14' : 'w-52'}`}>
 
-      {/* 로고 + 접기 버튼 */}
       <div className="p-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
         {!collapsed && (
           <div className="flex items-center gap-2">
@@ -59,17 +74,15 @@ export default function Sidebar({ activePage, onPageChange, isDark, onToggleDark
         )}
       </div>
 
-      {/* 접혔을 때 펼치기 버튼 */}
       {collapsed && (
         <button
-          onClick={() => { setCollapsed(false); onCollapse(false) } }
+          onClick={() => { setCollapsed(false); onCollapse(false) }}
           className="mx-auto mt-2 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
         >
           <ChevronRight size={14} className="text-gray-400" />
         </button>
       )}
 
-      {/* 메뉴 */}
       <nav className="flex-1 p-2 overflow-y-auto">
         {menuItems.map((item) => {
           const Icon = item.icon
@@ -93,7 +106,6 @@ export default function Sidebar({ activePage, onPageChange, isDark, onToggleDark
           )
         })}
 
-        {/* 최근 채팅 */}
         {!collapsed && (
           <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
             <button
@@ -110,23 +122,42 @@ export default function Sidebar({ activePage, onPageChange, isDark, onToggleDark
               }
             </button>
 
-            {!chatCollapsed && recentChats.map((chat) => (
-              <button
-                key={chat.id}
-                onClick={() => {
-                  onPageChange('home')
-                  onChatSelect(chat.id)
-                }}
-                className="w-full text-left px-3 py-1.5 rounded-lg text-xs text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 truncate transition mb-0.5"
-              >
-                {chat.title}
-              </button>
-            ))}
+            {!chatCollapsed && recentChats.length === 0 && (
+              <p className="text-xs text-gray-400 px-3 py-1">대화 기록이 없어요</p>
+            )}
+
+            {!chatCollapsed && (
+          <div className="flex flex-col max-h-64 overflow-y-auto">
+            {recentChats.map((chat) => (
+  <div
+    key={chat.room_id}
+    className="group flex items-center rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition mb-0.5"
+  >
+    <button
+      onClick={() => onRoomSelect(chat.room_id)}
+      className="flex-1 text-left px-3 py-1.5 text-xs text-gray-500 dark:text-gray-400 truncate"
+    >
+      {chat.title}
+    </button>
+    <button
+      onClick={async (e) => {
+        e.stopPropagation()
+        if (!confirm('이 대화를 삭제할까요?')) return
+        await fetch(`${BASE_URL}/api/conversations/${chat.room_id}`, { method: 'DELETE' })
+        fetchChats()
+      }}
+      className="opacity-0 group-hover:opacity-100 pr-2 transition text-gray-500 dark:text-gray-400 hover:text-red-400 dark:hover:text-red-400"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+    </button>
+  </div>
+))}
+      </div>
+            )}
           </div>
         )}
       </nav>
 
-      {/* 하단 */}
       {!collapsed && (
         <div className="p-4 border-t border-gray-100 dark:border-gray-700">
           <button
@@ -148,7 +179,6 @@ export default function Sidebar({ activePage, onPageChange, isDark, onToggleDark
         </div>
       )}
 
-      {/* 접혔을 때 하단 아이콘만 */}
       {collapsed && (
         <div className="p-2 border-t border-gray-100 dark:border-gray-700 flex flex-col items-center gap-2">
           <button onClick={onToggleDark} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
@@ -159,7 +189,6 @@ export default function Sidebar({ activePage, onPageChange, isDark, onToggleDark
           </div>
         </div>
       )}
-
     </div>
   )
 }
