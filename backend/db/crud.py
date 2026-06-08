@@ -213,3 +213,23 @@ def delete_message(message_id: str) -> bool:
     conn.close()
 
     return deleted_count > 0
+
+
+# 특정 채팅방 하나의 정보를 조회하는 함수
+def get_conversation_by_id(room_id: str):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT id, title, created_at, updated_at
+        FROM conversations
+        WHERE id = ?
+        """,
+        (room_id,)
+    )
+
+    row = cursor.fetchone()
+    conn.close()
+
+    return row

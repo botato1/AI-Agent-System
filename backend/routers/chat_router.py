@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from backend.schemas.chat_schema import ChatRequest, ChatHistoryResponse
 from backend.schemas.response_schema import ChatResponseSchema
 from backend.services.chat_service import handle_chat
-from backend.db.crud import create_conversation, get_conversations, get_messages, delete_conversation, delete_message
+from backend.db.crud import create_conversation, get_conversations, get_messages, delete_conversation, delete_message, get_conversation_by_id
 
 class ConversationCreateRequest(BaseModel):
     title : str = "새 대화"
@@ -70,6 +70,28 @@ def get_chat_rooms():
 
     return {
         "conversations": conversations
+    }
+
+# 채팅방 단건 조회 API
+@router.get("/conversations/{room_id}")
+def get_conversation_detail(room_id: str):
+    row = get_conversation_by_id(room_id)
+
+    if not row:
+        return {
+            "status": "error",
+            "room_id": room_id,
+            "message": "채팅방을 찾을 수 없습니다",
+            "error": "conversation_not_found"
+        }
+    
+    return {
+        "status": "success",
+        "room_id": row[0],
+        "title": row[1],
+        "created_at": row[2],
+        "updated_at": row[3],
+        "error": None
     }
 
 # 채팅방 삭제 API : 특정 채팅방과 해당 채팅방의 메시지를 삭제하는 몌ㅑ

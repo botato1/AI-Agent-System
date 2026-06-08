@@ -4,7 +4,7 @@ from backend.services.rag_service import rag_service
 
 
 def rag_node(state: AgentState) -> AgentState:
-    user_message = state["user_message"]
+    user_message = state.get("user_message", "")
 
     try:
         result = asyncio.run(rag_service.retrieve_relevant_knowledge(
@@ -12,9 +12,19 @@ def rag_node(state: AgentState) -> AgentState:
             top_k=5
         ))
 
-        if result["status"] == "success" and result["count"] > 0:
-            rag_context = "\n\n".join([doc["content"] for doc in result["data"]])
-            sources = [{"title": doc["title"], "score": doc["score"]} for doc in result["data"]]
+        if result.get("status") == "success" and result.get("count", 0) > 0:
+            rrag_context = "\n\n".join([
+                doc.get("content", "")
+                for doc in result.get("data", [])
+            ])
+            
+            sources = [
+                {
+                    "title": doc.get("title"),
+                    "score": doc.get("score")
+                }
+                for doc in result.get("data", [])
+            ]
         else:
             rag_context = ""
             sources = []
