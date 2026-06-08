@@ -29,6 +29,16 @@ def get_chat_history(room_id: str):
     rows = get_messages(room_id)
 
     messages = [
+    {
+        "message_id": row["id"],
+        "role": row["role"],
+        "content": row["content"],
+        "created_at": row["created_at"]
+    }
+    for row in rows
+    ]
+    '''
+    messages = [
         {
             "message_id": row[0],
             "role": row[1],
@@ -37,7 +47,7 @@ def get_chat_history(room_id: str):
         }
         for row in rows
     ]
-
+    '''
     return {
         "room_id": room_id,
         "messages": messages
@@ -57,7 +67,18 @@ def create_chat_room(request: ConversationCreateRequest):
 @router.get("/conversations")
 def get_chat_rooms():
     rows = get_conversations()
+    
+    conversations = [
+    {
+        "room_id": row["id"],
+        "title": row["title"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"]
+    }
+    for row in rows
+]
 
+    '''
     conversations = [
         {
             "room_id": row[0],
@@ -67,11 +88,11 @@ def get_chat_rooms():
         }
         for row in rows
     ]
-
+    '''
     return {
         "conversations": conversations
     }
-
+    
 # 채팅방 단건 조회 API
 @router.get("/conversations/{room_id}")
 def get_conversation_detail(room_id: str):
@@ -87,12 +108,12 @@ def get_conversation_detail(room_id: str):
     
     return {
         "status": "success",
-        "room_id": row[0],
-        "title": row[1],
-        "created_at": row[2],
-        "updated_at": row[3],
+        "room_id": row["id"],
+        "title": row["title"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
         "error": None
-    }
+    }   
 
 # 채팅방 삭제 API : 특정 채팅방과 해당 채팅방의 메시지를 삭제하는 몌ㅑ
 @router.delete("/conversations/{room_id}")
