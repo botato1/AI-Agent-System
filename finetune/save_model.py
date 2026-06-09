@@ -8,7 +8,7 @@ if str(BASE_DIR) not in sys.path:
 
 from unsloth import FastLanguageModel
 
-CHECKPOINT_DIR = str(BASE_DIR / "models" / "qwen2.5-7b-finetuned" / "checkpoint-225")
+CHECKPOINT_DIR = str(BASE_DIR / "models" / "qwen2.5-7b-finetuned" / "checkpoint-300")
 OUTPUT_DIR = str(BASE_DIR / "models" / "qwen2.5-7b-finetuned")
 
 print("체크포인트 로딩 중...")

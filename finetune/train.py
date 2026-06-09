@@ -48,9 +48,7 @@ def train():
 
     def format_prompt(example):
         return {
-            "text": f"""[INST] {example['instruction']}
-
-입력: {example['input']} [/INST] {example['output']}"""
+            "text": f"""[INST] {example['instruction']} [/INST] {example['output']}"""
         }
 
     dataset = dataset.map(format_prompt)
