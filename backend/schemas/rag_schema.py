@@ -1,0 +1,68 @@
+# ChromaDB / RAG 관련 구조
+from typing import Optional, List
+from pydantic import BaseModel, Field
+
+
+class ChromaMetadataSchema(BaseModel):
+    id: str
+    title: str
+    type: str
+    source: str
+    language: str
+    created_at: str
+    status: str
+    chroma_id: str
+    user_edited: bool
+    tags: str                   # ChromaDB에는 콤마 문자열로 저장
+    importance_score: int
+
+    notion_url: Optional[str] = None
+    error: Optional[str] = None
+    chunk_id: Optional[str] = None
+    page_number: Optional[int] = None
+    content_type: Optional[str] = None
+
+class RagSearchItemSchema(BaseModel):
+    id: str
+    content: str
+    source: str
+    source_url: Optional[str] = None
+    data_type: Optional[str] = None
+    importance: Optional[int] = None
+    score: Optional[float] = None
+    title: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class RagSearchResponseSchema(BaseModel):
+    status: str
+    query: str
+    count: int
+    data: List[RagSearchItemSchema] = Field(default_factory=list)
+    error: Optional[str] = None
+
+
+class ChromaSearchResultSchema(BaseModel):
+    id: str
+    content: str
+    metadata: ChromaMetadataSchema
+    score: Optional[float] = None
+
+
+
+# Ollama 요청 구조
+class OllamaRequest(BaseModel):
+    user_input: str
+    conversation_id: Optional[str] = None
+    filter_type: Optional[str] = None
+
+
+# Ollama 응답 구조
+class OllamaResponse(BaseModel):
+    status: str
+    original_input: str
+    normalized_input: str
+    intent: str
+    answer: str
+    sources: List[str] = Field(default_factory=list)
+    error: Optional[str] = None

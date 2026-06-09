@@ -4,3 +4,26 @@ __pycache__/
 *.pyc
 .DS_Store
 frontend/node_modules/
+
+# 테스트 파일
+test_file/
+test/
+
+# 데이터 파일
+data/raw/
+data/processed/
+data/uploads/
+
+# 자동 생성 저장소
+storage/
+
+# 모델 결과물
+models/
+
+# 패키지 캐시 파일
+0.0.27.post2
+2.4.0
+2.3.0
+26.1.2
+3.0.0
+unsloth_compiled_cache/
