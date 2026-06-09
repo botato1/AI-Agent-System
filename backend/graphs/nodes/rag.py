@@ -1,6 +1,20 @@
 import asyncio
+
 from backend.schemas.agent_schema import AgentState
 from backend.services.rag_service import rag_service
+
+
+def build_rag_filter(state: AgentState) -> dict | None:
+    if state.get("rag_filter"):
+        return state.get("rag_filter")
+
+    if state.get("target_document_id"):
+        return {"document_id": state.get("target_document_id")}
+
+    if state.get("target_filename"):
+        return {"filename": state.get("target_filename")}
+
+    return None
 
 
 def rag_node(state: AgentState) -> AgentState:
@@ -10,40 +24,103 @@ def rag_node(state: AgentState) -> AgentState:
             "rag_context": state.get("rag_context") or "",
             "sources": state.get("sources", []),
             "current_step": "rag_node",
-            "error": None,
+            "error": state.get("error"),
         }
+
     user_message = state.get("user_message", "")
+    rag_filter = build_rag_filter(state)
+    target_filename = state.get("target_filename")
 
     try:
-        result = asyncio.run(rag_service.retrieve_relevant_knowledge(
-            query=user_message,
-            top_k=5
-        ))
+        print("[rag_node] user_message:", user_message)
+        print("[rag_node] target_filename:", target_filename)
+        print("[rag_node] rag_filter:", rag_filter)
+
+        # 1차 검색: filename/document_id filter 기반 검색
+        result = asyncio.run(
+            rag_service.retrieve_relevant_knowledge(
+                query=user_message,
+                top_k=5,
+                filter=rag_filter
+            )
+        )
+
+        print("[rag_node] first search count:", result.get("count"))
+
+        # 임시 fallback:
+        # metadata에 filename이 없고 title에 "파일명.pdf - chunk n"만 있는 경우
+        if target_filename and result.get("count", 0) == 0:
+            fallback_result = asyncio.run(
+                rag_service.retrieve_relevant_knowledge(
+                    query=target_filename,
+                    top_k=50,
+                    filter=None
+                )
+            )
+
+            print("[rag_node] fallback count:", fallback_result.get("count"))
+            print("[rag_node] fallback data:", fallback_result.get("data"))
+
+            if fallback_result.get("status") == "success":
+                filtered_docs = [
+                    doc for doc in fallback_result.get("data", [])
+                    if target_filename in (doc.get("title") or "")
+                ]
+
+                print("[rag_node] filtered_docs count:", len(filtered_docs))
+
+                result = {
+                    **fallback_result,
+                    "count": len(filtered_docs),
+                    "data": filtered_docs
+                }
 
         if result.get("status") == "success" and result.get("count", 0) > 0:
+            docs = result.get("data", [])
+
             rag_context = "\n\n".join([
                 doc.get("content", "")
-                for doc in result.get("data", [])
+                for doc in docs
+                if doc.get("content")
             ])
-            
+
             sources = [
                 {
+                    "id": doc.get("id")
+                        or doc.get("document_id")
+                        or doc.get("chroma_id"),
+                    "document_id": doc.get("document_id"),
+                    "filename": doc.get("filename"),
                     "title": doc.get("title"),
-                    "score": doc.get("score")
+                    "source": doc.get("source")
+                        or doc.get("filename")
+                        or doc.get("title"),
+                    "score": doc.get("score"),
                 }
-                for doc in result.get("data", [])
+                for doc in docs
             ]
+
         else:
             rag_context = ""
             sources = []
 
+        return {
+            **state,
+            "rag_context": rag_context,
+            "sources": sources,
+            "rag_filter": rag_filter,
+            "current_step": "rag_node",
+            "error": None,
+        }
+
     except Exception as e:
         print(f"[rag_node 에러]: {str(e)}")
-        rag_context = ""
-        sources = []
 
-    return {
-        **state,
-        "rag_context": rag_context,
-        "sources": sources,
-    }
+        return {
+            **state,
+            "rag_context": "",
+            "sources": [],
+            "rag_filter": rag_filter,
+            "current_step": "rag_node",
+            "error": str(e),
+        }

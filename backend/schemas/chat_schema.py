@@ -12,9 +12,13 @@ class MessageSchema(BaseModel):
 
 # React가 사용자의 채팅 메시지를 FastAPI로 보낼 때 사용하는 요청 구조
 class ChatRequest(BaseModel):
-    room_id: str            # 어느 채팅방에서 보낸 메시지인지
-    content: str            # 사용자가 입력한 실제 질문
-    source: str = "text"    # 입력 출처 text / voice / pdf / docx / md / image
+    room_id: str
+    content: str
+    source: str = "text"
+
+    # 프론트에서 선택한 문서 식별값
+    target_document_id: Optional[str] = None
+    target_filename: Optional[str] = None
 
 
 # DB에 저장되거나 DB에서 조회되는 메시지의 구조

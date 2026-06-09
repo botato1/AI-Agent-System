@@ -1,4 +1,5 @@
 # 채팅 요청 처리 서비스
+import asyncio
 from datetime import datetime
 
 from backend.schemas.chat_schema import ChatRequest
@@ -26,6 +27,16 @@ def create_initial_state(request: ChatRequest) -> AgentState:
         "memory_context": None,
         "rag_context": None,
         "sources": [],
+
+        "target_document_id": request.target_document_id,
+        "target_filename": request.target_filename,
+        "rag_filter": (
+            {"document_id": request.target_document_id}
+            if request.target_document_id
+            else {"filename": request.target_filename}
+            if request.target_filename
+            else None
+        ),
 
         # 4. 질문 유형 판단 결과
         "question_type": "general",
@@ -59,16 +70,23 @@ def normalize_sources(sources: list | None) -> list[dict]:
     normalized_sources = []
 
     for idx, source in enumerate(sources):
-        # source가 이미 dict인 경우
         if isinstance(source, dict):
             normalized_sources.append({
-                "id": source.get("id") or source.get("chroma_id") or f"source_{idx + 1}",
-                "source": source.get("source") or source.get("title") or "unknown",
-                "title": source.get("title") or source.get("source") or f"source_{idx + 1}",
+                "id": source.get("id")
+                    or source.get("document_id")
+                    or source.get("chroma_id")
+                    or f"source_{idx + 1}",
+                "source": source.get("source")
+                    or source.get("filename")
+                    or source.get("title")
+                    or "unknown",
+                "title": source.get("title")
+                    or source.get("filename")
+                    or source.get("source")
+                    or f"source_{idx + 1}",
                 "score": source.get("score"),
             })
 
-        # source가 문자열인 경우
         elif isinstance(source, str):
             normalized_sources.append({
                 "id": f"source_{idx + 1}",
@@ -81,18 +99,13 @@ def normalize_sources(sources: list | None) -> list[dict]:
 
 # AgentState를 프론트 응답 형식으로 반환하는 함수
 # 현재는 ollama_service 결과를 함께 사용하고 나중에 LangGraph 결과 state만 받아도 응답을 만들 수 있도록 분리
-def build_chat_response(
-    state: AgentState,
-    ollama_result: dict | None = None
-) -> ChatResponseSchema:
-    ollama_result = ollama_result or {}
-
-    raw_sources = state.get("sources") or ollama_result.get("sources", [])
+def build_chat_response(state: AgentState) -> ChatResponseSchema:
+    raw_sources = state.get("sources", [])
     sources = normalize_sources(raw_sources)
 
     return ChatResponseSchema(
         room_id=state.get("room_id", ""),
-        answer=state.get("final_answer") or ollama_result.get("answer") or "",
+        answer=state.get("final_answer") or "",
         summary=state.get("summary"),
         tasks=state.get("tasks", []),
         sources=sources,
@@ -105,14 +118,9 @@ def build_chat_response(
             "need_rag": state.get("need_rag"),
             "need_task_extract": state.get("need_task_extract"),
             "need_notion_save": state.get("need_notion_save"),
-            "ollama": {
-                "status": ollama_result.get("status"),
-                "original_input": ollama_result.get("original_input"),
-                "normalized_input": ollama_result.get("normalized_input"),
-                "intent": ollama_result.get("intent"),
-                "sources": ollama_result.get("sources", []),
-                "error": ollama_result.get("error"),
-            }
+            "target_document_id": state.get("target_document_id"),
+            "target_filename": state.get("target_filename"),
+            "rag_filter": state.get("rag_filter"),
         },
         error=state.get("error"),
     )
@@ -121,6 +129,37 @@ def build_chat_response(
 def run_agent_graph(state: AgentState) -> AgentState:
     return agent_graph.invoke(state)
 
+
+async def handle_chat(request: ChatRequest) -> ChatResponseSchema:    
+    # 1. 사용자 메시지 DB 저장
+    insert_message(
+        conversation_id=request.room_id,
+        role="user",
+        content=request.content
+    )
+
+    # 2. ChatRequest를 AgentState로 변환
+    state = create_initial_state(request)
+
+    # 3. LangGraph 실행
+    # FastAPI async event loop 안에서 LangGraph sync invoke를 직접 실행하면
+    # rag_node 내부 asyncio.run()과 충돌할 수 있으므로 별도 thread에서 실행
+    result_state = await asyncio.to_thread(run_agent_graph, state)
+
+    # 4. 최종 답변 추출
+    answer = result_state.get("final_answer") or "응답을 생성하지 못했습니다."
+
+    # 5. assistant 답변 DB 저장
+    insert_message(
+        conversation_id=request.room_id,
+        role="assistant",
+        content=answer
+    )
+
+    # 6. 최종 응답 반환
+    return build_chat_response(result_state)
+
+'''
 # 채팅 요청을 처리하는 함수
 async def handle_chat(request: ChatRequest) -> ChatResponseSchema:
 
@@ -179,3 +218,5 @@ async def handle_chat(request: ChatRequest) -> ChatResponseSchema:
 
     # 8. 최종 응답 반환
     return build_chat_response(state, ollama_result)
+'''
+

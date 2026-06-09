@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from backend.schemas.chat_schema import ChatRequest, ChatHistoryResponse
 from backend.schemas.response_schema import ChatResponseSchema
 from backend.services.chat_service import handle_chat
-from backend.db.crud import create_conversation, get_conversations, get_messages, delete_conversation, delete_message, get_conversation_by_id
+from backend.db.crud import create_conversation, get_conversations, get_messages, delete_conversation, delete_message, get_conversation_by_id, get_documents
 
 class ConversationCreateRequest(BaseModel):
     title : str = "새 대화"
@@ -105,15 +105,41 @@ def get_conversation_detail(room_id: str):
             "message": "채팅방을 찾을 수 없습니다",
             "error": "conversation_not_found"
         }
-    
+
+    document_rows = get_documents(room_id)
+
+    documents = [
+        {
+            "document_id": doc["id"],
+            "filename": doc["title"],
+            "title": doc["title"],
+            "type": doc["type"],
+            "source": doc["source"],
+            "summary": doc["summary"],
+            "status": doc["status"],
+            "created_at": doc["created_at"],
+        }
+        for doc in document_rows
+    ]
+
+    target_document = documents[0] if documents else None
+
     return {
         "status": "success",
         "room_id": row["id"],
         "title": row["title"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
+
+        # 프론트가 /api/chat에 그대로 넘길 수 있는 대표 문서 정보
+        "target_document_id": target_document["document_id"] if target_document else None,
+        "target_filename": target_document["filename"] if target_document else None,
+
+        # 채팅방에 연결된 전체 문서 목록
+        "documents": documents,
+
         "error": None
-    }   
+    }  
 
 # 채팅방 삭제 API : 특정 채팅방과 해당 채팅방의 메시지를 삭제하는 몌ㅑ
 @router.delete("/conversations/{room_id}")
