@@ -22,9 +22,18 @@ def has_chinese(text: str) -> bool:
     return bool(re.search(r'[\u4e00-\u9fff]', text))
 
 def normalize_query(user_input: str) -> str:
+    # 파일 확장자 포함된 경우 변환 안함
+    if re.search(r'\.(pdf|docx|doc|md|txt|xlsx|pptx|csv)', user_input, re.IGNORECASE):
+        return user_input
+
     prompt = f"""[INST] 당신은 한국어 개발 용어 변환기입니다.
 반드시 한국어로만 출력하세요. 중국어 사용 절대 금지.
-개발자 은어를 표준 용어로 변환하고 변환된 문장만 출력하세요.
+개발자 은어와 약어만 표준 용어로 변환하고 변환된 문장만 출력하세요.
+
+절대 변환하면 안되는 것:
+- 파일명 (예: 보고서.pdf, 회의록.docx)
+- 고유명사, 사람 이름
+- 숫자, 날짜
 
 예시)
 입력: 쿠버 파드 뻗었어
@@ -33,11 +42,11 @@ def normalize_query(user_input: str) -> str:
 입력: 디비 삑났어
 변환: 데이터베이스 장애 발생
 
+입력: 무도_하지마_7장_보고서.pdf 요약해줘
+변환: 무도_하지마_7장_보고서.pdf 요약해줘
+
 입력: OOM이 뭐야
 변환: OOM이 뭐야
-
-입력: JWT가 뭐야
-변환: JWT가 뭐야
 
 입력: {user_input}
 변환: [/INST]"""
@@ -141,10 +150,10 @@ if __name__ == "__main__":
     result = normalize_query("쿠버 파드 뻗었어")
     print(f"변환 결과: {result}")
 
+    print("\n=== 파일명 보존 테스트 ===")
+    result2 = normalize_query("무도_하지마_7장_보고서.pdf 요약해줘")
+    print(f"변환 결과: {result2}")
+
     print("\n=== 의도 파악 테스트 ===")
     intent = classify_intent("저번 쿠버 OOM 터진거 어떻게 해결했지")
     print(f"의도: {intent}")
-
-    print("\n=== 답변 생성 테스트 ===")
-    answer = generate_answer("OOM이 뭐야")
-    print(f"답변: {answer}")
