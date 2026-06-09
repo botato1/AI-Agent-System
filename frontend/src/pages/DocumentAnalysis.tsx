@@ -1,3 +1,4 @@
+// 문서 분석 결과 페이지
 import { Document, Packer, Paragraph, TextRun, HeadingLevel } from 'docx'
 import { saveAs } from 'file-saver'
 import { jsPDF } from 'jspdf'
@@ -9,22 +10,24 @@ import { useState } from 'react'
 
 import { ArrowLeft, Download, Share2 } from 'lucide-react'
 
-import TabSummary from '../components/Analysis/TabSummary'
-import TabOriginal from '../components/Analysis/TabOriginal'
-import ConfidenceBar from '../components/Analysis/ConfidenceBar'
-import TabTasks from '../components/Analysis/TabTasks'
-import TabRelated from '../components/Analysis/TabRelated'
+import TabSummary from '../components/DocumentAnalysis/TabSummary'
+import TabOriginal from '../components/DocumentAnalysis/TabOriginal'
+import ConfidenceBar from '../components/shared/ConfidenceBar'
+import TabTasks from '../components/DocumentAnalysis/TabTasks'
+import TabRelated from '../components/DocumentAnalysis/TabRelated'
 
 const tabs = ['요약', '전체 문서', 'Task', '연관 문서']
 
 interface AnalysisProps {
-  onReview: () => void
+  onReview: () => void  //검토하기
+  onGoToChat?: () => void //채팅으로 이동
 }
 
-export default function Analysis({ onReview }: AnalysisProps) {
+export default function Analysis({ onReview, onGoToChat  }: AnalysisProps) {
   const { showToast } = useToast()
-  const [activeTab, setActiveTab] = useState(0)
+  const [activeTab, setActiveTab] = useState(0) //활성화 탭 기본은 요약 탭
 
+  //PDF 다운로드 jsPDF+나눔고딕
   const handleDownload = () => {
     const doc = new jsPDF()
     doc.addFileToVFS('NanumGothic.ttf', NanumGothicBase64)
@@ -38,30 +41,41 @@ export default function Analysis({ onReview }: AnalysisProps) {
     doc.save('마케팅전략회의_분석보고서.pdf')
   }
 
+  // DOCX 다운로드: docx 라이브러리로 Word 문서 생성
   const handleDownloadDocx = async () => {
-    const doc = new Document({
+     const doc = new Document({
       sections: [{
         children: [
-          new Paragraph({ text: '마케팅 전략 회의 분석 보고서', heading: HeadingLevel.HEADING_1 }),
-          new Paragraph({ children: [new TextRun({ text: '회의 일시: 2024.05.20 (월) 14:00', size: 22 })] }),
+          new Paragraph({
+            text: '마케팅 전략 회의 분석 보고서',
+            heading: HeadingLevel.HEADING_1
+          }),
+          new Paragraph({
+            children: [
+              new TextRun({ text: '회의 일시: 2024.05.20 (월) 14:00', size: 22 })
+            ]
+          }),
         ]
       }]
     })
-    const blob = await Packer.toBlob(doc)
+    const blob = await Packer.toBlob(doc) // 문서를 Blob으로 변환 
     saveAs(blob, '마케팅전략회의_분석보고서.docx')
   }
 
+  //TXT 다운로드
   const handleDownloadTxt = () => {
     const content = `마케팅 전략 회의 분석 보고서\n회의 일시: 2024.05.20 (월) 14:00`
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
     saveAs(blob, '마케팅전략회의_분석보고서.txt')
   }
 
+  //공유 (현재 페이지 url 복사)
   const handleShare = () => {
     navigator.clipboard.writeText(window.location.href)
     showToast('링크가 복사됐어요')
   }
 
+  //activeTab 인덱스에 따라 탭 컴포넌트 변경
 const renderTab = () => {
   switch (activeTab) {
     case 0: return <TabSummary />
@@ -100,9 +114,12 @@ const renderTab = () => {
           <button onClick={handleShare} className="flex items-center gap-1.5 text-xs text-white bg-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-700">
             <Share2 size={13} /> 공유하기
           </button>
+          <button onClick={onGoToChat} className="flex items-center gap-1.5 text-xs text-white bg-green-600 px-3 py-1.5 rounded-lg hover:bg-green-700">
+          채팅으로 이동 →
+          </button>
         </div>
       </div>
-
+      {/*신뢰도 바 , 검토 버튼*/}
       <ConfidenceBar confidence={72} onReview={onReview} />
 
       <div className="flex gap-1 mb-6 border-b border-gray-100 dark:border-gray-700">
@@ -110,12 +127,14 @@ const renderTab = () => {
           <button
             key={i}
             onClick={() => setActiveTab(i)}
+            //활성/비활성 탭
             className={`text-sm px-4 py-2 border-b-2 transition ${activeTab === i ? 'border-blue-600 text-blue-600 font-medium' : 'border-transparent text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}
           >
             {tab}
           </button>
         ))}
       </div>
+      {/*선택된 탭 렌더링*/ }
       {renderTab()}
     </div>
   )
