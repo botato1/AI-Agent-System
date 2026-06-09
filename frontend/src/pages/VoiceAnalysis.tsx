@@ -1,11 +1,12 @@
+//음성 분석 결과 페이지
 import { useState } from 'react'
 import { Download, Share2 } from 'lucide-react'
 import { useToast } from '../App'
-import TabSummary from '../components/Voice/TabSummary'
-import TabScript from '../components/Voice/TabScript'
-import TabTasks from '../components/Voice/TabTasks'
-import TabSpeakers from '../components/Voice/TabSpeakers'
-import ConfidenceBar from '../components/Analysis/ConfidenceBar'
+import TabSummary from '../components/VoiceAnalysis/TabSummary'
+import TabScript from '../components/VoiceAnalysis/TabScript'
+import TabTasks from '../components/VoiceAnalysis/TabTasks'
+import TabSpeakers from '../components/VoiceAnalysis/TabSpeakers'
+import ConfidenceBar from '../components/shared/ConfidenceBar'
 
 const tabs = ['요약', '스크립트', 'Task', '발언자']
 

@@ -18,9 +18,12 @@ interface PipelineProps {
   onGoToAnalysis: () => void
   reviewFileName: string | null
   onClearReview: () => void
+  onRoomCreated?: () => void
+  onFileUploaded?: (filename: string) => void
+  onRoomIdCreated?: (roomId: string) => void
 }
 
-export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview }: PipelineProps) {
+export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview, onRoomCreated, onFileUploaded, onRoomIdCreated }: PipelineProps) {
   const [file, setFile] = useState<string | null>(null)
   const [statuses, setStatuses] = useState<Status[]>(Array(6).fill('wait'))
   const [currentStep, setCurrentStep] = useState(-1)
@@ -41,7 +44,7 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
     setIsRunning(true)
 
     addLog('채팅방 생성 중...')
-        try {
+    try {
       // 1. 채팅방 생성
       const roomRes = await fetch(`${BASE_URL}/api/conversations`, {
         method: 'POST',
@@ -52,6 +55,7 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
       const roomData = await roomRes.json()
       const roomId = roomData.room_id
       addLog(`채팅방 생성 완료 (${roomId})`)
+      onRoomIdCreated?.(roomId)
 
       // 2. 문서 업로드
       addLog('문서 업로드 중...')
@@ -67,6 +71,10 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
       const uploadData = await uploadRes.json()
       addLog(`업로드 완료: ${uploadData.filename}`)
 
+      // 파일명 전달 + 사이드바 갱신 + 홈으로 이동
+      onFileUploaded?.(uploadData.filename)
+      setTimeout(() => onRoomCreated?.(), 1000)
+
       // 3. 파이프라인 시작
       setCurrentStep(0)
 
@@ -77,7 +85,7 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
       setIsRunning(false)
     }
   }
-  
+
   useEffect(() => {
     if (currentStep < 0 || currentStep >= 6) {
       if (currentStep === 6) setIsRunning(false)
@@ -101,16 +109,16 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
     return () => clearTimeout(timer)
   }, [currentStep])
 
-useEffect(() => {
-  if (reviewFileName) {
-    addLog(`재검토 요청: ${reviewFileName}`)
-    setFile(reviewFileName)
-    setStatuses(Array(6).fill('wait'))
-    setLogs([])
-    setCurrentStep(0)
-    setIsRunning(true)
-  }
-}, [reviewFileName])
+  useEffect(() => {
+    if (reviewFileName) {
+      addLog(`재검토 요청: ${reviewFileName}`)
+      setFile(reviewFileName)
+      setStatuses(Array(6).fill('wait'))
+      setLogs([])
+      setCurrentStep(0)
+      setIsRunning(true)
+    }
+  }, [reviewFileName])
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
@@ -124,15 +132,15 @@ useEffect(() => {
     if (selected) startPipeline(selected)
   }
 
- const reset = () => {
-  setFile(null)
-  setStatuses(Array(6).fill('wait'))
-  setCurrentStep(-1)
-  setLogs([])
-  setIsRunning(false)
-  setUploadError(null)
-  onClearReview()
-}
+  const reset = () => {
+    setFile(null)
+    setStatuses(Array(6).fill('wait'))
+    setCurrentStep(-1)
+    setLogs([])
+    setIsRunning(false)
+    setUploadError(null)
+    onClearReview()
+  }
 
   const getIcon = (status: Status) => {
     if (status === 'done') return <CheckCircle size={18} className="text-blue-500" />
@@ -143,7 +151,7 @@ useEffect(() => {
 
   const doneCount = statuses.filter(s => s === 'done').length
 
-   return (
+  return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>

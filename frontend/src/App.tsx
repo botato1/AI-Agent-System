@@ -1,7 +1,7 @@
 import { useState, useEffect, createContext, useContext } from 'react'
 import Sidebar from './components/layout/Sidebar'
 import Home from './pages/Home'
-import Analysis from './pages/Analysis'
+import Analysis from './pages/DocumentAnalysis'
 import Tasks from './pages/Tasks'
 import Settings from './pages/Settings'
 import Pipeline from './pages/Pipeline'
@@ -29,6 +29,8 @@ export default function App() {
   const [reviewFileName, setReviewFileName] = useState<string | null>(null)
   const [sidebarRefreshKey, setSidebarRefreshKey] = useState(0)
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null)
+  const [targetFilename, setTargetFilename] = useState<string | null>(null)
+  const [targetRoomId, setTargetRoomId] = useState<string | null>(null)
 
   useEffect(() => {
     if (isDark) {
@@ -46,28 +48,38 @@ export default function App() {
   const renderPage = () => {
     switch (activePage) {
     case 'home': return (
-  <Home
-    selectedChatId={selectedChatId}
-    onRoomCreated={() => setSidebarRefreshKey(prev => prev + 1)}
-    onSelectRoom={(room_id) => setActiveRoomId(room_id)}
-    activeRoomId={activeRoomId}
-    setActiveRoomId={setActiveRoomId}
-  />
-)
+      <Home
+        selectedChatId={selectedChatId}
+        onRoomCreated={() => setSidebarRefreshKey(prev => prev + 1)}
+        onSelectRoom={(room_id) => setActiveRoomId(room_id)}
+        activeRoomId={activeRoomId}
+        setActiveRoomId={setActiveRoomId}
+        targetFilename={targetFilename}  // 추가
+      />
+    )
       case 'pipeline': return (
         <Pipeline
-          onGoToAnalysis={() => setActivePage('analysis')}
-          reviewFileName={reviewFileName}
-          onClearReview={() => setReviewFileName(null)}
-        />
-      )
+        onGoToAnalysis={() => setActivePage('analysis')}
+        reviewFileName={reviewFileName}
+        onClearReview={() => setReviewFileName(null)}
+        onRoomCreated={() => setSidebarRefreshKey(prev => prev + 1)}
+        onFileUploaded={(filename) => setTargetFilename(filename)}
+        onRoomIdCreated={(roomId) => setTargetRoomId(roomId)}
+      />
+    )
       case 'analysis': return (
-        <Analysis onReview={() => {
+        <Analysis
+        onReview={() => {
           setReviewFileName('마케팅 전략 회의.pdf')
           setActivePage('home')
           setTimeout(() => setActivePage('pipeline'), 0)
-        }} />
-      )
+        }}
+        onGoToChat={() => {
+          setActiveRoomId(targetRoomId)
+          setActivePage('home')
+        }}
+      />
+    )
       case 'tasks': return <Tasks />
       case 'settings': return <Settings />
       case 'graph': return <Graph onGoToAnalysis={() => setActivePage('analysis')} />
@@ -81,8 +93,8 @@ export default function App() {
         />
       )
       case 'voice': return (
-        <VoiceAnalysis onReview={() => setActivePage('voice')} />
-      )
+  <VoiceAnalysis onReview={() => {}} />  // 일단 이렇게만 해도 됨
+)
       default: return (
         <div className="flex items-center justify-center h-full">
           <p className="text-gray-400 text-sm">준비 중인 페이지예요 😊</p>
