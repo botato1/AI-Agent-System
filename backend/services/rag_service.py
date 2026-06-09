@@ -26,8 +26,9 @@ def is_rag_result_relevant(rag_result: dict, min_score: float = 0.5) -> bool:
 class RAGService:
 
     @staticmethod
-    async def retrieve_relevant_knowledge(
+    def retrieve_relevant_knowledge(
         query: str,
+        original_query: str = None,	
         top_k: int = 5,
         relative_threshold: float = 0.5,
         filter: dict = None
