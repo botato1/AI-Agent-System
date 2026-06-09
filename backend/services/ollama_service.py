@@ -42,7 +42,7 @@ class OllamaService:
 
             if intent == "rag_search":
                 # RAG 검색
-                rag_result = await rag_service.retrieve_relevant_knowledge(
+                rag_result = rag_service.retrieve_relevant_knowledge(
                     query=normalized,
                     top_k=5
                 )
@@ -57,7 +57,7 @@ class OllamaService:
 
             elif intent == "task_extract":
                 # 액션아이템 추출용 RAG 검색 (회의록만)
-                rag_result = await rag_service.retrieve_relevant_knowledge(
+                rag_result = rag_service.retrieve_relevant_knowledge(
                     query=normalized,
                     top_k=3,
                     filter={"type": "meeting"}
