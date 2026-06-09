@@ -1,14 +1,14 @@
-# 채팅방/메시지 구조
 from typing import List, Optional
 from pydantic import BaseModel
 
 
 # 대화 기록 안에 들어가는 메시지 하나의 최소 구조
 class MessageSchema(BaseModel):
-    message_id: Optional[str] = None  # 메시지 고유 UUID
-    role: str                         # user / assistant / system
-    content: str                      # 실제 메시지 내용
-    created_at: Optional[str] = None  # 메시지 생성 시간
+    message_id: Optional[str] = None
+    role: str
+    content: str
+    created_at: Optional[str] = None
+
 
 # React가 사용자의 채팅 메시지를 FastAPI로 보낼 때 사용하는 요청 구조
 class ChatRequest(BaseModel):
@@ -23,11 +23,11 @@ class ChatRequest(BaseModel):
 
 # DB에 저장되거나 DB에서 조회되는 메시지의 구조
 class ChatMessage(BaseModel):
-    message_id: str     # 메시지 고유 UUID
-    room_id: str        # 채팅방 ID
-    role: str           # user / assistant / system
-    content: str        # 메시지 내용
-    created_at: str     # 메시지가 생성된 시간, ISO 8601
+    message_id: str
+    room_id: str
+    role: str
+    content: str
+    created_at: str
 
 
 # 이전 대화 기록을 React 또는 LangGraph에 반환할 때 쓰는 구조

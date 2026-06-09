@@ -5,6 +5,14 @@ from backend.services.rag_service import rag_service
 
 
 def build_rag_filter(state: AgentState) -> dict | None:
+    """
+    AgentState에 저장된 문서 식별 정보를 기준으로 RAG 검색 filter를 만든다.
+
+    우선순위:
+    1. rag_filter
+    2. target_document_id
+    3. target_filename
+    """
     if state.get("rag_filter"):
         return state.get("rag_filter")
 
@@ -36,7 +44,7 @@ def rag_node(state: AgentState) -> AgentState:
         print("[rag_node] target_filename:", target_filename)
         print("[rag_node] rag_filter:", rag_filter)
 
-        # 1차 검색: filename/document_id filter 기반 검색
+        # 1차 검색: document_id / filename filter 기반 검색
         result = asyncio.run(
             rag_service.retrieve_relevant_knowledge(
                 query=user_message,
@@ -58,16 +66,11 @@ def rag_node(state: AgentState) -> AgentState:
                 )
             )
 
-            print("[rag_node] fallback count:", fallback_result.get("count"))
-            print("[rag_node] fallback data:", fallback_result.get("data"))
-
             if fallback_result.get("status") == "success":
                 filtered_docs = [
                     doc for doc in fallback_result.get("data", [])
                     if target_filename in (doc.get("title") or "")
                 ]
-
-                print("[rag_node] filtered_docs count:", len(filtered_docs))
 
                 result = {
                     **fallback_result,

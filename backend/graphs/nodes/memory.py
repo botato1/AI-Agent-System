@@ -1,6 +1,7 @@
 from backend.schemas.agent_schema import AgentState
 from backend.db.crud import get_messages
 
+
 # sqlite3.Row 또는 tuple/list 모두 대응하기 위한 안전 접근 함수
 def _get_value(row, key: str, index: int, default=None):
     try:
@@ -39,9 +40,13 @@ def memory_node(state: AgentState) -> AgentState:
 
             memory_lines.append(f"{role}: {content}")
 
-            if (role == "assistant"
+            # 가장 최근 assistant 답변을 저장 대상으로 사용
+            # 단, Notion 저장 결과 메시지는 다시 저장 대상으로 쓰지 않음
+            if (
+                role == "assistant"
                 and not content.startswith("Notion에 저장했습니다.")
-                and "Notion 저장 중 오류가 발생했습니다" not in content):
+                and "Notion 저장 중 오류가 발생했습니다" not in content
+            ):
                 last_assistant_answer = content
 
         memory_context = "\n".join(memory_lines)

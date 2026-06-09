@@ -91,7 +91,7 @@ def is_task_request(message: str) -> bool:
         "액션 아이템",
         "업무 정리",
         "업무 추출",
-        "업무 목록"
+        "업무 목록",
     ]
 
     return any(keyword in message for keyword in task_keywords)
@@ -175,8 +175,9 @@ JSON 형식:
             "need_rag": False,
             "need_task_extract": False,
             "need_notion_save": False,
-            "target_filename": None,
-            "rag_filter": None,
+            "target_document_id": state.get("target_document_id"),
+            "target_filename": state.get("target_filename"),
+            "rag_filter": state.get("rag_filter"),
             "current_step": "classifier_node",
             "error": str(e),
         }
@@ -189,7 +190,6 @@ JSON 형식:
 
     target_document_id = state.get("target_document_id")
     target_filename = state.get("target_filename") or extract_filename_from_query(user_message)
-
     rag_filter = state.get("rag_filter")
 
     memory_request = is_memory_request(user_message)
@@ -198,16 +198,17 @@ JSON 형식:
     document_request = has_document_keyword(user_message)
     summary_request = has_summary_keyword(user_message)
 
-    # 1. 파일명이 명시된 경우 해당 파일 검색 필터 준비
+    # 1. 프론트에서 선택 문서가 넘어온 경우 document_id 우선
     if target_document_id:
         rag_filter = {"document_id": target_document_id}
         need_rag = True
 
+    # 2. 파일명이 명시된 경우 해당 파일 검색 필터 준비
     elif target_filename:
         rag_filter = {"filename": target_filename}
         need_rag = True
 
-    # 2. task/회의록 할 일 추출 요청은 가장 우선한다.
+    # 3. task/회의록 할 일 추출 요청은 가장 우선한다.
     # Notion 저장이 같이 있어도 task_extract를 notion_save로 덮으면 안 된다.
     if task_request or meeting_request or need_task_extract:
         question_type = "task_extract"
@@ -215,30 +216,30 @@ JSON 형식:
         need_rag = True
         need_task_extract = True
 
-    # 3. 방금/이전/위 내용 요청이면 memory 필요
+    # 4. 방금/이전/위 내용 요청이면 memory 필요
     if memory_request:
         need_memory = True
 
-    # 4. 문서 관련 요청이면 RAG 필요
+    # 5. 문서 관련 요청이면 RAG 필요
     if document_request:
         need_rag = True
 
         if question_type in {"general", "term_explanation"}:
             question_type = "document_question"
 
-    # 5. 문서 요약/정리 요청이면 document_summary로 보정
+    # 6. 문서 요약/정리 요청이면 document_summary로 보정
     # 단, task_extract 요청은 문서 요약으로 덮지 않는다.
-    if document_request and summary_request and not need_task_extract:
+    if (document_request or target_document_id or target_filename) and summary_request and not need_task_extract:
         question_type = "document_summary"
         need_rag = True
 
-    # 6. 방금/이전 내용을 Notion에 저장하는 경우는 memory 기반 저장이다.
+    # 7. 방금/이전 내용을 Notion에 저장하는 경우는 memory 기반 저장이다.
     # 이 경우에는 RAG나 task 추출을 타지 않는다.
     if need_notion_save and need_memory and not need_task_extract:
         question_type = "notion_save"
         need_rag = False
 
-    # 7. 단순 Notion 저장 요청
+    # 8. 단순 Notion 저장 요청
     if need_notion_save and not need_task_extract and not need_rag:
         question_type = "notion_save"
 

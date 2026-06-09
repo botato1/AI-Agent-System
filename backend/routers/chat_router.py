@@ -1,14 +1,23 @@
-# 채팅 관련 API 엔드포인트
 from fastapi import APIRouter
 from pydantic import BaseModel
 
 from backend.schemas.chat_schema import ChatRequest, ChatHistoryResponse
 from backend.schemas.response_schema import ChatResponseSchema
 from backend.services.chat_service import handle_chat
-from backend.db.crud import create_conversation, get_conversations, get_messages, delete_conversation, delete_message, get_conversation_by_id, get_documents
+from backend.db.crud import (
+    create_conversation,
+    get_conversations,
+    get_messages,
+    delete_conversation,
+    delete_message,
+    get_conversation_by_id,
+    get_documents,
+)
+
 
 class ConversationCreateRequest(BaseModel):
-    title : str = "새 대화"
+    title: str = "새 대화"
+
 
 router = APIRouter(
     prefix="/api",
@@ -25,33 +34,23 @@ async def send_chat_message(request: ChatRequest):
 # 특정 채팅방의 이전 대화 기록 조회 API
 @router.get("/conversations/{room_id}/messages", response_model=ChatHistoryResponse)
 def get_chat_history(room_id: str):
-
     rows = get_messages(room_id)
 
     messages = [
-    {
-        "message_id": row["id"],
-        "role": row["role"],
-        "content": row["content"],
-        "created_at": row["created_at"]
-    }
-    for row in rows
-    ]
-    '''
-    messages = [
         {
-            "message_id": row[0],
-            "role": row[1],
-            "content": row[2],
-            "created_at": row[3]
+            "message_id": row["id"],
+            "role": row["role"],
+            "content": row["content"],
+            "created_at": row["created_at"]
         }
         for row in rows
     ]
-    '''
+
     return {
         "room_id": room_id,
         "messages": messages
     }
+
 
 # 새 채팅방을 생성하는 API
 @router.post("/conversations")
@@ -59,40 +58,31 @@ def create_chat_room(request: ConversationCreateRequest):
     room_id = create_conversation(request.title)
 
     return {
-        "room_id" : room_id,
-        "title" : request.title
+        "room_id": room_id,
+        "title": request.title
     }
+
 
 # 전체 채팅방 목록을 조회하는 API
 @router.get("/conversations")
 def get_chat_rooms():
     rows = get_conversations()
-    
-    conversations = [
-    {
-        "room_id": row["id"],
-        "title": row["title"],
-        "created_at": row["created_at"],
-        "updated_at": row["updated_at"]
-    }
-    for row in rows
-]
 
-    '''
     conversations = [
         {
-            "room_id": row[0],
-            "title": row[1],
-            "created_at": row[2],
-            "updated_at": row[3]
+            "room_id": row["id"],
+            "title": row["title"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"]
         }
         for row in rows
     ]
-    '''
+
     return {
         "conversations": conversations
     }
-    
+
+
 # 채팅방 단건 조회 API
 @router.get("/conversations/{room_id}")
 def get_conversation_detail(room_id: str):
@@ -130,18 +120,14 @@ def get_conversation_detail(room_id: str):
         "title": row["title"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
-
-        # 프론트가 /api/chat에 그대로 넘길 수 있는 대표 문서 정보
         "target_document_id": target_document["document_id"] if target_document else None,
         "target_filename": target_document["filename"] if target_document else None,
-
-        # 채팅방에 연결된 전체 문서 목록
         "documents": documents,
-
         "error": None
-    }  
+    }
 
-# 채팅방 삭제 API : 특정 채팅방과 해당 채팅방의 메시지를 삭제하는 몌ㅑ
+
+# 채팅방 삭제 API
 @router.delete("/conversations/{room_id}")
 def remove_chat_room(room_id: str):
     deleted = delete_conversation(room_id)
@@ -161,7 +147,8 @@ def remove_chat_room(room_id: str):
         "error": None
     }
 
-# 메시지 삭제 API : 특정 메시지 1개를 삭제하는 API
+
+# 메시지 삭제 API
 @router.delete("/messages/{message_id}")
 def remove_message(message_id: str):
     deleted = delete_message(message_id)
