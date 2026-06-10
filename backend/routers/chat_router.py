@@ -21,7 +21,7 @@ class ConversationCreateRequest(BaseModel):
 
 router = APIRouter(
     prefix="/api",
-    tags=["Chat"]
+    tags=["Chat"],
 )
 
 
@@ -41,14 +41,14 @@ def get_chat_history(room_id: str):
             "message_id": row["id"],
             "role": row["role"],
             "content": row["content"],
-            "created_at": row["created_at"]
+            "created_at": row["created_at"],
         }
         for row in rows
     ]
 
     return {
         "room_id": room_id,
-        "messages": messages
+        "messages": messages,
     }
 
 
@@ -59,7 +59,7 @@ def create_chat_room(request: ConversationCreateRequest):
 
     return {
         "room_id": room_id,
-        "title": request.title
+        "title": request.title,
     }
 
 
@@ -73,13 +73,13 @@ def get_chat_rooms():
             "room_id": row["id"],
             "title": row["title"],
             "created_at": row["created_at"],
-            "updated_at": row["updated_at"]
+            "updated_at": row["updated_at"],
         }
         for row in rows
     ]
 
     return {
-        "conversations": conversations
+        "conversations": conversations,
     }
 
 
@@ -93,7 +93,7 @@ def get_conversation_detail(room_id: str):
             "status": "error",
             "room_id": room_id,
             "message": "채팅방을 찾을 수 없습니다",
-            "error": "conversation_not_found"
+            "error": "conversation_not_found",
         }
 
     document_rows = get_documents(room_id)
@@ -123,7 +123,7 @@ def get_conversation_detail(room_id: str):
         "target_document_id": target_document["document_id"] if target_document else None,
         "target_filename": target_document["filename"] if target_document else None,
         "documents": documents,
-        "error": None
+        "error": None,
     }
 
 
@@ -137,14 +137,14 @@ def remove_chat_room(room_id: str):
             "status": "error",
             "room_id": room_id,
             "message": "삭제할 채팅방을 찾을 수 없습니다.",
-            "error": "conversation_not_found"
+            "error": "conversation_not_found",
         }
 
     return {
         "status": "success",
         "room_id": room_id,
         "message": "채팅방이 삭제되었습니다.",
-        "error": None
+        "error": None,
     }
 
 
@@ -158,12 +158,12 @@ def remove_message(message_id: str):
             "status": "error",
             "message_id": message_id,
             "message": "삭제할 메시지를 찾을 수 없습니다.",
-            "error": "message_not_found"
+            "error": "message_not_found",
         }
 
     return {
         "status": "success",
         "message_id": message_id,
         "message": "메시지가 삭제되었습니다.",
-        "error": None
+        "error": None,
     }
