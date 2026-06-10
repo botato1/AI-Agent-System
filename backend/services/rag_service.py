@@ -1,12 +1,17 @@
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
+from backend.modules.rag.chroma_client import search_hybrid
+from backend.modules.rag.chroma_client import (
+    search_hybrid,
+    MEETING_COLLECTION,  
+    DOCUMENT_COLLECTION,  
+    KNOWLEDGE_COLLECTION, 
+)
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 if str(BASE_DIR) not in sys.path:
     sys.path.append(str(BASE_DIR))
-
-from backend.modules.rag.chroma_client import search_hybrid
 
 def get_utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
