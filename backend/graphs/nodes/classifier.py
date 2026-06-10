@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import unicodedata
 
 from dotenv import load_dotenv
 from langchain_ollama import ChatOllama
@@ -16,6 +17,11 @@ llm = ChatOllama(
     base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 )
 
+def normalize_text(value: str | None) -> str | None:
+    if not value:
+        return None
+
+    return unicodedata.normalize("NFC", value).strip()
 
 # 사용자 질문에서 파일명 추출
 def extract_filename_from_query(query: str) -> str | None:
@@ -23,7 +29,7 @@ def extract_filename_from_query(query: str) -> str | None:
     match = re.search(pattern, query, re.IGNORECASE)
 
     if match:
-        return match.group(1).strip()
+        return normalize_text(match.group(1))
 
     return None
 
@@ -189,7 +195,9 @@ JSON 형식:
     need_notion_save = result.get("need_notion_save", False)
 
     target_document_id = state.get("target_document_id")
-    target_filename = state.get("target_filename") or extract_filename_from_query(user_message)
+    target_filename = normalize_text(
+        state.get("target_filename") or extract_filename_from_query(user_message)
+    )
     rag_filter = state.get("rag_filter")
 
     memory_request = is_memory_request(user_message)

@@ -1,4 +1,5 @@
 import asyncio
+import unicodedata
 
 from backend.schemas.agent_schema import AgentState
 from backend.services.rag_service import rag_service
@@ -24,6 +25,11 @@ def build_rag_filter(state: AgentState) -> dict | None:
 
     return None
 
+def normalize_text(value: str | None) -> str:
+    if not value:
+        return ""
+    
+    return unicodedata.normalize("NFC", value).strip()
 
 def rag_node(state: AgentState) -> AgentState:
     if not state.get("need_rag", False):
@@ -67,10 +73,12 @@ def rag_node(state: AgentState) -> AgentState:
             )
 
             if fallback_result.get("status") == "success":
+                normalized_target_filename = normalize_text(target_filename)
+                
                 filtered_docs = [
                     doc for doc in fallback_result.get("data", [])
-                    if target_filename in (doc.get("title") or "")
-                ]
+                    if normalized_target_filename in normalize_text(doc.get("title"))
+                    ]
 
                 result = {
                     **fallback_result,
