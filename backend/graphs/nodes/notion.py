@@ -135,6 +135,39 @@ def notion_node(state: AgentState) -> AgentState:
         tasks = state.get("tasks", [])
         document_json = state.get("document_json") or {}
 
+        # 회의록/task 추출 저장 요청인데 실제 문서 내용이나 추출된 할 일이 없으면 저장하지 않음
+        if state.get("need_task_extract"):
+            has_source_content = bool((rag_context or "").strip()) or bool(
+                (document_json.get("content") or "").strip()
+            )
+            has_tasks = bool(tasks)
+
+            if not has_source_content:
+                return {
+                    **state,
+                    "notion_result": {
+                        "status": "error",
+                        "notion_url": None,
+                        "error": "회의록 내용을 찾지 못해 Notion에 저장하지 않았습니다.",
+                    },
+                    "final_answer": "회의록 내용을 찾지 못해 Notion에 저장하지 않았습니다. 회의록 파일이 선택되어 있는지 확인해 주세요.",
+                    "current_step": "notion_node",
+                    "error": "rag_context_empty",
+                }
+
+            if not has_tasks:
+                return {
+                    **state,
+                    "notion_result": {
+                        "status": "error",
+                        "notion_url": None,
+                        "error": "추출된 할 일이 없어 Notion에 저장하지 않았습니다.",
+                    },
+                    "final_answer": "추출된 할 일이 없어 Notion에 저장하지 않았습니다. 회의록 내용에서 담당자, 할 일, 마감일 정보를 찾을 수 있는지 확인해 주세요.",
+                    "current_step": "notion_node",
+                    "error": "tasks_empty",
+                }
+
         requested_title = _extract_requested_title(user_message)
 
         title = (
@@ -144,8 +177,10 @@ def notion_node(state: AgentState) -> AgentState:
         )
 
         # Notion 저장 대상 content 결정
-        # 회의록 할 일 추출 저장이면 RAG 검색 결과를 원본으로 우선 사용
-        if state.get("need_task_extract") and rag_context:
+        # 문서/음성 JSON이 직접 넘어온 경우 document_json.content를 우선 사용
+        if state.get("need_task_extract") and document_json.get("content"):
+            content = document_json.get("content")
+        elif state.get("need_task_extract") and rag_context:
             content = rag_context
         elif save_target_content:
             content = save_target_content
