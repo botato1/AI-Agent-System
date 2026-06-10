@@ -23,12 +23,30 @@ def is_rag_result_relevant(rag_result: dict, min_score: float = 0.5) -> bool:
     top_score = data[0].get("score", 0)
     return top_score >= min_score
 
+def _select_collection(question_type: str) -> str | None:
+    """
+    question_type 기반으로 검색할 컬렉션 선택 (2차 판단)
+    None 반환 시 3개 컬렉션 전체 검색
+    """
+    if question_type in ("task_extract", "past_record_search", "memory_search"):
+        return MEETING_COLLECTION       # 회의록에서만 검색
+
+    elif question_type == "error_troubleshooting":
+        return KNOWLEDGE_COLLECTION     # 기술문서에서만 검색
+
+    elif question_type in ("document_summary", "document_question"):
+        return DOCUMENT_COLLECTION      # 사용자 업로드 문서에서만 검색
+
+    else:
+        return None                     # 전체 검색
+
+
 class RAGService:
 
     @staticmethod
     def retrieve_relevant_knowledge(
         query: str,
-        original_query: str = None,	
+        original_query: str = None,
         top_k: int = 5,
         relative_threshold: float = 0.5,
         filter: dict = None
@@ -36,12 +54,13 @@ class RAGService:
         """
         하이브리드 검색 (BGE-M3 벡터 + 키워드)
         → 상대평가 필터링
+        → 품질 검증
         → 공통키 + 문서 식별 필드 반환
 
         filter 예시
-        → {"type": "meeting"}           회의록만
-        → {"document_id": "uuid"}       특정 문서만
-        → {"filename": "회의록.pdf"}    특정 파일만
+        → {"type": "meeting"}            회의록만
+        → {"document_id": "uuid"}        특정 문서만
+        → {"filename": "회의록.pdf"}     특정 파일만
         → {"upload_context": "document"} 문서 업로드만
         """
         print(f"[RAG Service] 쿼리: '{query}'")
@@ -98,15 +117,27 @@ class RAGService:
                     "room_id": meta.get("room_id", ""),
                 })
 
-            print(f"[RAG Service] 완료 → {len(processed_documents)}개 반환 (최고점: {max_score})")
-
-            return {
+            # 품질 검증 — 내부에서 처리 후 외부엔 count만 전달
+            result = {
                 "status": "success",
                 "query": query,
                 "count": len(processed_documents),
                 "data": processed_documents,
                 "error": None
             }
+
+            if not is_rag_result_relevant(result):
+                print(f"[RAG Service] 품질 미달 → 빈 결과 반환")
+                return {
+                    "status": "success",
+                    "query": query,
+                    "count": 0,
+                    "data": [],
+                    "error": None
+                }
+
+            print(f"[RAG Service] 완료 → {len(processed_documents)}개 반환 (최고점: {max_score})")
+            return result
 
         except Exception as e:
             print(f"[RAG Service 에러]: {str(e)}")
