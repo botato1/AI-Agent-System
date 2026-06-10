@@ -9,7 +9,37 @@ from backend.graphs.nodes.task import task_node
 from backend.graphs.nodes.answer import answer_node
 from backend.graphs.nodes.notion import notion_node
 
-# LangGraph Agent 실행 흐름을 구성하는 함수
+
+def route_after_classifier(state: AgentState) -> str:
+    if state.get("need_memory", False):
+        return "memory"
+    if state.get("need_rag", False):
+        return "rag"
+    if state.get("need_task_extract", False):
+        return "task"
+    return "answer"
+
+
+def route_after_memory(state: AgentState) -> str:
+    if state.get("need_rag", False):
+        return "rag"
+    if state.get("need_task_extract", False):
+        return "task"
+    return "answer"
+
+
+def route_after_rag(state: AgentState) -> str:
+    if state.get("need_task_extract", False):
+        return "task"
+    return "answer"
+
+
+def route_after_answer(state: AgentState) -> str:
+    if state.get("need_notion_save", False):
+        return "notion"
+    return "end"
+
+
 def build_agent_graph():
     graph = StateGraph(AgentState)
 
@@ -21,16 +51,58 @@ def build_agent_graph():
     graph.add_node("answer", answer_node)
     graph.add_node("notion", notion_node)
 
-    # 2. 실행 순서 연결
+    # 2. 시작
     graph.add_edge(START, "classifier")
-    graph.add_edge("classifier", "memory")
-    graph.add_edge("memory", "rag")
-    graph.add_edge("rag", "task")
+
+    # 3. classifier 이후 필요한 첫 노드로 이동
+    graph.add_conditional_edges(
+        "classifier",
+        route_after_classifier,
+        {
+            "memory": "memory",
+            "rag": "rag",
+            "task": "task",
+            "answer": "answer",
+        }
+    )
+
+    # 4. memory 이후 다음 필요 노드로 이동
+    graph.add_conditional_edges(
+        "memory",
+        route_after_memory,
+        {
+            "rag": "rag",
+            "task": "task",
+            "answer": "answer",
+        }
+    )
+
+    # 5. rag 이후 task 필요 여부 판단
+    graph.add_conditional_edges(
+        "rag",
+        route_after_rag,
+        {
+            "task": "task",
+            "answer": "answer",
+        }
+    )
+
+    # 6. task 이후 answer
     graph.add_edge("task", "answer")
-    graph.add_edge("answer", "notion")
+
+    # 7. answer 이후 notion 필요 여부 판단
+    graph.add_conditional_edges(
+        "answer",
+        route_after_answer,
+        {
+            "notion": "notion",
+            "end": END,
+        }
+    )
+
+    # 8. notion 이후 종료
     graph.add_edge("notion", END)
 
-    # 3. 그래프 컴파일
     return graph.compile()
 
 
