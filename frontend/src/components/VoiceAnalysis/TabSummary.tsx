@@ -1,48 +1,94 @@
+// 분석 통계
 const analysisStats = [
-  { label: '총 발언 시간', value: '42분' },
-  { label: '발언자 수', value: '3명' },
-  { label: '추출된 Task', value: '5개' },
-  { label: '분석 소요 시간', value: '3.1초' },
+  { label: '총 발언 시간', value: '48:32' },
+  { label: '발언자 수', value: '4명' },
+  { label: '추출된 Task', value: '4개' },
+  { label: '분석 소요 시간', value: '2.1초' },
+]
+
+// 주요 내용 타임라인
+const timeline = [
+  { time: '00:00', text: '회의 시작 및 참석자 소개' },
+  { time: '02:15', text: '지난 캠페인 성과 리뷰' },
+  { time: '14:30', text: '신규 채널 전략 논의' },
+  { time: '27:45', text: '다음 분기 키 메시지 및 예산 논의' },
+  { time: '42:10', text: '마무리 및 다음 회의 일정' },
+]
+
+// 액션 아이템
+const actionItems = [
+  { title: '신규 채널 콘텐츠 캘린더 작성', assignee: '박민수', due: '05.20' },
+  { title: '다음 분기 예산안 최종 검토', assignee: '이애전', due: '05.21' },
+  { title: '캠페인 키 메시지 정리', assignee: '김나연', due: '05.22' },
+  { title: '성과 리포트 템플릿 업데이트', assignee: '최지우', due: '05.23' },
 ]
 
 export default function TabSummary() {
   return (
     <div className="flex flex-col gap-4">
+      {/* 통계 카드 */}
       <div className="grid grid-cols-4 gap-3">
         {analysisStats.map((stat, i) => (
-          <div key={i} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4 text-center">
-            <p className="text-lg font-bold text-blue-600 dark:text-blue-400">{stat.value}</p>
+          <div key={i} className="bg-white dark:bg-[#1c1a1a] rounded-xl border border-gray-100 dark:border-gray-700 p-4 text-center">
+            <p className="text-lg font-semibold text-blue-600 dark:text-blue-400">{stat.value}</p>
             <p className="text-xs text-gray-400 mt-1">{stat.label}</p>
           </div>
         ))}
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">회의 요약</h3>
+      <div className="grid grid-cols-3 gap-4">
+        {/* AI 요약 */}
+        <div className="bg-white dark:bg-[#1c1a1a] rounded-xl border border-gray-100 dark:border-gray-700 p-4">
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-3">AI 요약</h3>
           <ul className="flex flex-col gap-2">
             {[
-              '마케팅 전략 회의에서 SNS 캠페인 방향 확정',
-              '인스타그램 릴스 중심 콘텐츠 제작 결정',
-              '타겟 연령대 20~35세로 설정',
-              '광고 예산 산정 및 담당자 배분',
-              '다음 회의: 5월 27일 (월)',
+              '캠페인 성과는 전반적으로 목표 대비 120% 달성',
+              '신규 채널(유튜브, 인스타그램) 확대 방안 논의',
+              '다음 분기 캠페인 키 메시지 및 예산 검토',
+              '팀별 역할 분담 및 일정 조율 완료',
             ].map((item, i) => (
               <li key={i} className="flex items-start gap-2 text-xs text-gray-600 dark:text-gray-300">
-                <span className="w-1 h-1 rounded-full bg-blue-400 mt-1.5 flex-shrink-0"></span>
+                <span className="w-1 h-1 rounded-full bg-blue-400 mt-1.5 flex-shrink-0" />
                 {item}
               </li>
             ))}
           </ul>
+          <button className="mt-3 text-xs text-blue-500 hover:text-blue-600 transition-colors">
+            자세히 보기 →
+          </button>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">키워드</h3>
-          <div className="flex flex-wrap gap-2">
-            {['SNS 캠페인', '인스타그램', '타겟 마케팅', '광고 예산', '콘텐츠 제작', '2분기'].map((tag, i) => (
-              <span key={i} className="text-xs bg-blue-50 dark:bg-blue-900 text-blue-500 dark:text-blue-300 px-3 py-1 rounded-full border border-blue-100 dark:border-blue-800">{tag}</span>
+        {/* 주요 내용 타임라인 */}
+        <div className="bg-white dark:bg-[#1c1a1a] rounded-xl border border-gray-100 dark:border-gray-700 p-4">
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-3">주요 내용</h3>
+          <div className="flex flex-col gap-2">
+            {timeline.map((item, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <span className="text-xs text-blue-500 font-medium w-10 flex-shrink-0">{item.time}</span>
+                <span className="text-xs text-gray-600 dark:text-gray-300">{item.text}</span>
+              </div>
             ))}
           </div>
+          <button className="mt-3 text-xs text-blue-500 hover:text-blue-600 transition-colors">
+            타임라인으로 보기 →
+          </button>
+        </div>
+
+        {/* 액션 아이템 */}
+        <div className="bg-white dark:bg-[#1c1a1a] rounded-xl border border-gray-100 dark:border-gray-700 p-4">
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-3">액션 아이템</h3>
+          <div className="flex flex-col gap-2">
+            {actionItems.map((item, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <input type="checkbox" className="w-3.5 h-3.5 accent-blue-500 flex-shrink-0" />
+                <span className="text-xs text-gray-600 dark:text-gray-300 flex-1 truncate">{item.title}</span>
+                <span className="text-xs text-gray-400 flex-shrink-0">{item.assignee} {item.due}</span>
+              </div>
+            ))}
+          </div>
+          <button className="mt-3 text-xs text-blue-500 hover:text-blue-600 transition-colors">
+            전체 액션 아이템 보기 →
+          </button>
         </div>
       </div>
     </div>

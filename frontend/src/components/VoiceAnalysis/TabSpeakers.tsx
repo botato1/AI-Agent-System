@@ -1,34 +1,71 @@
 //발언자 탭 - 발언자별 비율 상세
-const attendees = [
-  { name: '김나연', tags: ['SNS 캠페인', '인스타그램', '콘텐츠'], percent: 42 },
-  { name: '문지수', tags: ['광고 예산', '타겟 마케팅'], percent: 33 },
-  { name: '이승주', tags: ['경쟁사 분석', '성과 지표'], percent: 25 },
+const speakers = [
+  { name: '김나연', percent: 35, time: '17:02', color: 'bg-indigo-500' },
+  { name: '박민수', percent: 28, time: '13:36', color: 'bg-blue-400' },
+  { name: '이애전', percent: 22, time: '10:41', color: 'bg-violet-400' },
+  { name: '최지우', percent: 15, time: '07:13', color: 'bg-teal-400' },
 ]
 
 export default function TabSpeakers() {
-  return (
-    <div className="flex flex-col gap-4">
-      {attendees.map((a, i) => (
-        <div key={i} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center">
-              <span className="text-sm text-blue-600 dark:text-blue-300 font-medium">{a.name[0]}</span>
+  // 도넛 차트 SVG 계산
+  const radius = 40
+  const cx = 60
+  const cy = 60
+  const circumference = 2 * Math.PI * radius
+  let offset = 0
+
+  const segments = speakers.map(s => {
+    const dash = (s.percent / 100) * circumference
+    const seg = { ...s, dash, offset }
+    offset += dash
+    return seg
+  })
+
+  const colorMap: Record<string, string> = {
+    'bg-indigo-500': '#6366f1',
+    'bg-blue-400': '#60a5fa',
+    'bg-violet-400': '#a78bfa',
+    'bg-teal-400': '#2dd4bf',
+  }
+    
+ return (
+    <div className="bg-white dark:bg-[#1c1a1a] rounded-xl border border-gray-100 dark:border-gray-700 p-5">
+      <h3 className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-4">발언자 비중</h3>
+
+       {/* 도넛 차트 */}
+      <div className="flex justify-center mb-4">
+        <svg width="120" height="120" viewBox="0 0 120 120">
+          {segments.map((s, i) => (
+            <circle
+              key={i}
+              cx={cx} cy={cy} r={radius}
+              fill="none"
+              stroke={colorMap[s.color]}
+              strokeWidth="18"
+              strokeDasharray={`${s.dash} ${circumference - s.dash}`}
+              strokeDashoffset={-s.offset}
+              style={{ transform: 'rotate(-90deg)', transformOrigin: '60px 60px' }}
+            />
+          ))}
+        </svg>
+      </div>
+
+      {/* 범례 */}
+      <div className="flex flex-col gap-2">
+        {speakers.map((s, i) => (
+          <div key={i} className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className={`w-2.5 h-2.5 rounded-full ${s.color}`} />
+              <span className="text-xs text-gray-600 dark:text-gray-300">{s.name}</span>
             </div>
-            <div>
-              <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">{a.name}</p>
-              <p className="text-xs text-gray-400">발언 비율 {a.percent}%</p>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-gray-700 dark:text-gray-200">{s.percent}%</span>
+              <span className="text-xs text-gray-400">({s.time})</span>
             </div>
           </div>
-          <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-2 mb-3">
-            <div className="bg-blue-500 h-2 rounded-full" style={{ width: `${a.percent}%` }}></div>
-          </div>
-          <div className="flex gap-1 flex-wrap">
-            {a.tags.map((tag, j) => (
-              <span key={j} className="text-xs bg-blue-50 dark:bg-blue-900 text-blue-500 dark:text-blue-300 px-2 py-0.5 rounded-full border border-blue-100 dark:border-blue-800">{tag}</span>
-            ))}
-          </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   )
 }
+
