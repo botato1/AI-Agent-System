@@ -73,7 +73,7 @@ class OllamaService:
             "전에 말한",
         ]
 
-        return any(keyword in message for keyword in message and memory_keywords)
+        return any(keyword in message for keyword in memory_keywords)
 
     # Notion 저장 요청인지 키워드로 보정하는 함수
     @staticmethod
