@@ -1,39 +1,54 @@
-import os
-from dotenv import load_dotenv
-from langchain_ollama import ChatOllama
 from backend.schemas.agent_schema import AgentState
+from backend.services.ollama_service import ollama_service
 
-load_dotenv()
-llm = ChatOllama(model="qwen2.5:7b", temperature=0.7, base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"))
 
+# LangGraph에서 최종 답변 생성을 담당하는 노드
 def answer_node(state: AgentState) -> AgentState:
     user_message = state.get("user_message", "")
-    memory_context = state.get("memory_context", "")
-    rag_context = state.get("rag_context", "")
-    tasks = state.get("tasks", [])
+    question_type = state.get("question_type", "general")
 
-    prompt = f"""
-너는 도비(Doby)라는 AI 비서야.
-아래 정보를 참고해서 사용자 질문에 친절하게 답해줘.
+    rag_context = state.get("rag_context") or ""
+    memory_context = state.get("memory_context") or ""
+    tasks = state.get("tasks") or []
 
-사용자 질문: {user_message}
+    # Notion 저장 요청은 notion_node에서 최종 저장 결과를 만든다.
+    if state.get("need_notion_save", False):
+        return {
+            **state,
+            "final_answer": state.get("final_answer") or "Notion 저장 요청을 확인했습니다. 저장을 진행하겠습니다.",
+            "current_step": "answer_node",
+            "error": state.get("error"),
+        }
 
-이전 대화 기록:
-{memory_context}
+    # 문서 기반 질문인데 검색 결과가 없으면 추측 답변 방지
+    if state.get("need_rag", False) and not rag_context.strip():
+        return {
+            **state,
+            "final_answer": "요청하신 문서에서 관련 내용을 찾지 못했습니다. 문서가 업로드되어 있는지, 파일명이나 질문 내용을 확인해 주세요.",
+            "current_step": "answer_node",
+            "error": state.get("error"),
+        }
 
-참고 문서:
-{rag_context}
+    try:
+        final_answer = ollama_service.generate_answer_for_graph(
+            user_message=user_message,
+            question_type=question_type,
+            rag_context=rag_context,
+            memory_context=memory_context,
+            tasks=tasks,
+        )
 
-추출된 할 일 목록:
-{tasks}
+        return {
+            **state,
+            "final_answer": final_answer,
+            "current_step": "answer_node",
+            "error": state.get("error"),
+        }
 
-답변:
-"""
-
-    response = llm.invoke(prompt)
-
-    return {
-        **state,
-        "final_answer": response.content,
-        "current_step": "done",
-    }
+    except Exception as e:
+        return {
+            **state,
+            "final_answer": "답변 생성 중 오류가 발생했습니다.",
+            "current_step": "answer_node",
+            "error": str(e),
+        }

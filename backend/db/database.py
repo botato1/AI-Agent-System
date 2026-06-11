@@ -1,8 +1,8 @@
 # SQLite 데이터베이스 연결 관리
 import sqlite3
 from pathlib import Path
-
 from backend.core.config import settings
+
 
 DB_PATH = Path(settings.SQLITE_DB_PATH)
 
@@ -68,11 +68,40 @@ def init_db():
     )
     """)
 
+    # 5. documents (업로드 문서 정보)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS documents (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        type TEXT NOT NULL,
+        source TEXT NOT NULL,
+        file_path TEXT,
+        summary TEXT,
+        status TEXT DEFAULT 'uploaded',
+        notion_url TEXT,
+        error TEXT,
+        created_at TEXT NOT NULL
+    )
+    """)
+
+    # 6. tasks (액션아이템)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS tasks (
+        id TEXT PRIMARY KEY,
+        document_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        task TEXT NOT NULL,
+        assignee TEXT,
+        deadline TEXT,
+        status TEXT DEFAULT 'todo',
+        created_at TEXT NOT NULL
+    )
+    """)
+
     conn.commit()
     conn.close()
-
     print("DB 생성 완료:", settings.SQLITE_DB_PATH)
-
 
 if __name__ == "__main__":
     init_db()
