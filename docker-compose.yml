@@ -1,5 +1,4 @@
 services:
-
   # FastAPI 백엔드
   fastapi:
     build: .
@@ -59,4 +58,22 @@ services:
     #     reservations:
     #       devices:
     #         - capabilities: [gpu]
+    restart: always
+
+  # STT 음성인식 서버 (준오)
+  stt:
+    build:
+      context: ./backend/modules/stt
+      dockerfile: Dockerfile
+    container_name: ai-agent-stt
+    ports:
+      - "8002:8001"
+    volumes:
+      # 음성 파일 NAS 마운트 (서버 경로 확정 후 수정)
+      - /mnt/nas/storage/uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     restart: always
