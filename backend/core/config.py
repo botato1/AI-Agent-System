@@ -28,6 +28,13 @@ class Settings:
         "qwen2.5"
     )
 
+
+
+    # 파일 저장 경로 (NAS 연결 시 활성화)
+    # STORAGE_PATH: str = os.getenv("STORAGE_PATH", "storage/uploads")
+
+
+
     # Notion API 관련 값
     NOTION_TOKEN: str | None = os.getenv("NOTION_TOKEN")
     NOTION_DATABASE_ID: str | None = os.getenv("NOTION_DATABASE_ID")

@@ -3,7 +3,6 @@ import sqlite3
 from pathlib import Path
 from backend.core.config import settings
 
-from backend.core.config import settings
 
 DB_PATH = Path(settings.SQLITE_DB_PATH)
 
@@ -99,7 +98,6 @@ def init_db():
         created_at TEXT NOT NULL
     )
     """)
-    print("DB 생성 완료:", settings.SQLITE_DB_PATH)
 
     conn.commit()
     conn.close()
