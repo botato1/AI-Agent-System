@@ -517,7 +517,7 @@ def get_tasks(conversation_id: str) -> list:
         (conversation_id,),
     )
 
-    rows = cursor.fetchall()
+    rows = cursor.fetchall() or []
     conn.close()
 
     return [dict(row) for row in rows]
