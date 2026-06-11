@@ -1,24 +1,12 @@
-import os
 import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
-
-from dotenv import load_dotenv
-from langchain_ollama import ChatOllama
 
 from backend.schemas.agent_schema import AgentState
 from backend.schemas.notion_schema import NotionSaveRequest
 from backend.schemas.task_schema import TaskItemSchema
 from backend.services.notion_service import save_to_notion
-
-
-load_dotenv()
-
-llm = ChatOllama(
-    model="qwen2.5:7b",
-    temperature=0.3,
-    base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-)
+from backend.services.ollama_service import ollama_service
 
 
 # AgentState 안의 tasks는 dict 리스트로 들어올 수 있으므로 TaskItemSchema 리스트로 변환
@@ -53,10 +41,11 @@ def _to_dict(result):
     return {
         "status": "error",
         "notion_url": None,
-        "error": "Notion 저장 결과 형식을 변환할 수 없습니다."
+        "error": "Notion 저장 결과 형식을 변환할 수 없습니다.",
     }
 
 
+# 사용자 메시지에서 저장 제목을 추출하는 함수
 def _extract_requested_title(user_message: str) -> str | None:
     patterns = [
         r"저장\s*제목은\s*(.+?)(?:이라고|라고|으로|로)\s*해줘",
@@ -75,48 +64,17 @@ def _extract_requested_title(user_message: str) -> str | None:
     return None
 
 
-def _generate_summary_for_notion(content: str) -> str | None:
-    if not content or not content.strip():
-        return None
-
-    prompt = f"""
-아래 원본 내용을 Notion에 함께 저장할 요약문으로 정리해줘.
-
-[규칙]
-- 원본에 없는 내용은 추가하지 마라.
-- 핵심 내용만 간결하게 정리해라.
-- 한국어로 작성해라.
-- 제목은 만들지 마라.
-- 3~5개 bullet point 또는 짧은 문단으로 작성해라.
-
-원본 내용:
-{content}
-
-요약:
-"""
-
-    try:
-        response = llm.invoke(prompt)
-        return response.content.strip()
-
-    except Exception as e:
-        print(f"[notion_node 요약 생성 에러]: {str(e)}")
-        return None
-
-
 # LangGraph에서 Notion 저장을 담당하는 노드
 def notion_node(state: AgentState) -> AgentState:
     # 사용자가 Notion 저장을 원하지 않으면 저장하지 않음
     if not state.get("need_notion_save", False):
-        notion_result = {
-            "status": "skipped",
-            "notion_url": None,
-            "error": None,
-        }
-
         return {
             **state,
-            "notion_result": notion_result,
+            "notion_result": {
+                "status": "skipped",
+                "notion_url": None,
+                "error": None,
+            },
             "current_step": "notion_node",
             "error": state.get("error"),
         }
@@ -177,7 +135,6 @@ def notion_node(state: AgentState) -> AgentState:
         )
 
         # Notion 저장 대상 content 결정
-        # 문서/음성 JSON이 직접 넘어온 경우 document_json.content를 우선 사용
         if state.get("need_task_extract") and document_json.get("content"):
             content = document_json.get("content")
         elif state.get("need_task_extract") and rag_context:
@@ -193,8 +150,11 @@ def notion_node(state: AgentState) -> AgentState:
         else:
             content = user_message
 
-        # Notion에는 원본 내용과 요약을 함께 저장한다.
-        summary = existing_summary or document_json.get("summary") or _generate_summary_for_notion(content)
+        summary = (
+            existing_summary
+            or document_json.get("summary")
+            or ollama_service.generate_summary_for_notion(content)
+        )
 
         document_type = document_json.get("type") or "meeting"
         language = document_json.get("language") or "ko"
