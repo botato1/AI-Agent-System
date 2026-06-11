@@ -46,6 +46,45 @@ def create_conversation(title: str) -> str:
 
     return conv_id
 
+# 채팅방이 없으면 생성하고, 있으면 updated_at을 갱신하는 함수
+def ensure_conversation(conversation_id: str, title: str = "새 채팅"):
+    now = get_utc_now()
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT id
+        FROM conversations
+        WHERE id = ?
+        """,
+        (conversation_id,),
+    )
+
+    conversation = cursor.fetchone()
+
+    if conversation is None:
+        cursor.execute(
+            """
+            INSERT INTO conversations (id, title, created_at, updated_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (conversation_id, title, now, now),
+        )
+    else:
+        cursor.execute(
+            """
+            UPDATE conversations
+            SET updated_at = ?
+            WHERE id = ?
+            """,
+            (now, conversation_id),
+        )
+
+    conn.commit()
+    conn.close()
+
 
 # 채팅방의 updated_at 값을 현재 시간으로 갱신하는 함수
 def update_conversation_timestamp(conversation_id: str):
@@ -74,9 +113,22 @@ def get_conversations() -> list:
 
     cursor.execute(
         """
-        SELECT id, title, created_at, updated_at
-        FROM conversations
-        ORDER BY updated_at DESC
+        SELECT
+            c.id,
+            c.title,
+            c.created_at,
+            c.updated_at,
+            d.title AS filename
+        FROM conversations c
+        LEFT JOIN documents d
+            ON d.id = (
+                SELECT d2.id
+                FROM documents d2
+                WHERE d2.conversation_id = c.id
+                ORDER BY d2.created_at DESC
+                LIMIT 1
+            )
+        ORDER BY c.updated_at DESC
         """
     )
 

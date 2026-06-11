@@ -3,6 +3,8 @@ from pathlib import Path
 from fastapi import UploadFile
 
 from backend.modules.rag.document_loader import load_and_insert
+from backend.db.crud import ensure_conversation, save_document_metadata
+
 
 # TODO: 문서/음성 처리 담당자와 최종 지원 확장자 확정 필요
 # 현재는 테스트 및 임시 연동을 위한 허용 목록
@@ -10,9 +12,11 @@ ALLOWED_DOCUMENT_EXTENSIONS = {
     ".pdf",
     ".png", ".jpg", ".jpeg",
 }
+
 # 프로젝트 루트 기준 data/raw 경로
 BASE_DIR = Path(__file__).resolve().parents[2]
 UPLOAD_DIR = BASE_DIR / "data" / "raw"
+
 
 # 업로드 가능한 문서 파일인지 확장자로 검사하는 함수
 def is_allowed_document_file(file: UploadFile) -> bool:
@@ -28,6 +32,36 @@ def is_allowed_document_file(file: UploadFile) -> bool:
         return True
 
     return False
+
+
+def _get_document_type(filename: str, content_type: str | None) -> str:
+    suffix = Path(filename).suffix.lower()
+
+    if suffix == ".pdf":
+        return "document"
+
+    if suffix in {".png", ".jpg", ".jpeg"}:
+        return "image"
+
+    if content_type and content_type.startswith("audio/"):
+        return "voice"
+
+    return "document"
+
+
+def _get_source(filename: str, content_type: str | None) -> str:
+    suffix = Path(filename).suffix.lower()
+
+    if suffix == ".pdf":
+        return "pdf"
+
+    if suffix in {".png", ".jpg", ".jpeg"}:
+        return "image"
+
+    if content_type and content_type.startswith("audio/"):
+        return "voice"
+
+    return suffix.replace(".", "") or "file"
 
 
 # 문서 업로드 후 임시로 ChromaDB에 적재하는 함수
@@ -62,24 +96,46 @@ async def upload_and_process_document(file: UploadFile, room_id: str) -> dict:
 
         # 6. 파일 형식에 따라 처리 분기
         suffix = Path(filename).suffix.lower()
+        document_type = _get_document_type(filename, file.content_type)
+        source = _get_source(filename, file.content_type)
 
         if suffix == ".pdf":
             load_and_insert(str(save_path))
             message = "문서 업로드 및 ChromaDB 적재 완료"
+
         elif suffix in {".png", ".jpg", ".jpeg"}:
             message = "이미지 업로드 완료, OCR 처리는 추후 연동 예정"
+
         elif file.content_type and file.content_type.startswith("audio/"):
             message = "음성 파일 업로드 완료, Whisper 처리는 추후 연동 예정"
+
         else:
             message = "파일 업로드 완료"
-       
-        # 7. 성공 결과 반환
+
+        # 7. 업로드만 해도 채팅방 목록에 나오도록 conversations 생성/갱신
+        ensure_conversation(room_id, filename)
+
+        # 8. GET /api/conversations에서 filename을 반환할 수 있도록 documents 테이블에 저장
+        document_id = save_document_metadata({
+            "conversation_id": room_id,
+            "title": filename,
+            "type": document_type,
+            "source": source,
+            "file_path": str(save_path),
+            "summary": "",
+            "status": "processed",
+            "notion_url": "",
+            "error": "",
+        })
+
+        # 9. 성공 결과 반환
         return {
             "status": "success",
             "room_id": room_id,
-            "filename": file.filename,
+            "document_id": document_id,
+            "filename": filename,
             "saved_path": str(save_path),
-            "message": "문서 업로드 및 ChromaDB 적재 완료",
+            "message": message,
             "error": None
         }
 
