@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Home, CheckSquare, FolderOpen, Settings, Activity, GitFork, Moon, Sun, MessageSquare, ChevronLeft, ChevronRight, Mic } from 'lucide-react'
 
-const BASE_URL = 'http://192.168.0.235:8000'
+const BASE_URL = import.meta.env.VITE_API_URL
 
 const menuItems = [
   { icon: Home, label: '홈', id: 'home' },
@@ -18,6 +18,7 @@ interface Conversation {
   title: string
   created_at: string
   updated_at: string
+  filename: string | null
 }
 
 interface SidebarProps {
@@ -26,23 +27,28 @@ interface SidebarProps {
   isDark: boolean
   onToggleDark: () => void
   onChatSelect: (chatId: number) => void
-  onCollapse: (v: boolean) => void
-  refreshKey?: number
-  onRoomSelect: (room_id: string) => void
+  onCollapse: (v: boolean) => void //접힌 상태
+  refreshKey?: number  // 이 값이 변하면 채팅 목록 다시 불러옴
+  onRoomSelect: (room_id: string, filename: string | null) => void
 }
 
-export default function Sidebar({ activePage, onPageChange, isDark, onToggleDark, onChatSelect, onCollapse, refreshKey, onRoomSelect }: SidebarProps) {
+export default function Sidebar({ activePage, onPageChange, isDark, onToggleDark, onCollapse, refreshKey, onRoomSelect }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false)
   const [chatCollapsed, setChatCollapsed] = useState(false)
   const [recentChats, setRecentChats] = useState<Conversation[]>([])
 
+  //백엔드에서 최근 대화 목록 불러오기
   const fetchChats = () => {
     fetch(`${BASE_URL}/api/conversations`)
       .then(r => r.json())
-      .then(data => setRecentChats(data.conversations ?? []))
+      .then(data => {
+        console.log('대화 목록 응답:',data)
+        setRecentChats(data.conversations ?? [])
+      })
       .catch(err => console.error('채팅 목록 조회 실패:', err))
   }
 
+  //refreshKey 변경될 때마다 목록 갱신
   useEffect(() => {
     fetchChats()
   }, [refreshKey])
@@ -50,6 +56,7 @@ export default function Sidebar({ activePage, onPageChange, isDark, onToggleDark
   return (
     <div className={`h-screen bg-white dark:bg-[#161616] border-r border-gray-100 dark:border-[#2a2a2a] flex flex-col fixed left-0 top-0 transition-all duration-300 ${collapsed ? 'w-14' : 'w-52'}`}>
 
+    {/*상단 로고 , 접기 버튼*/}
       <div className="p-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
         {!collapsed && (
           <div className="flex items-center gap-2">
@@ -59,11 +66,13 @@ export default function Sidebar({ activePage, onPageChange, isDark, onToggleDark
             <span className="font-bold text-gray-800 dark:text-white text-lg">Agentra</span>
           </div>
         )}
+        {/*접혔을 때 로고만 표시*/}
         {collapsed && (
           <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center mx-auto">
             <span className="text-white text-xs font-bold">A</span>
           </div>
         )}
+        {/*접기 버튼*/}
         {!collapsed && (
           <button
             onClick={() => { setCollapsed(true); onCollapse(true) }}
@@ -73,7 +82,7 @@ export default function Sidebar({ activePage, onPageChange, isDark, onToggleDark
           </button>
         )}
       </div>
-
+        {/*펼치기 버튼*/}
       {collapsed && (
         <button
           onClick={() => { setCollapsed(false); onCollapse(false) }}
@@ -83,7 +92,9 @@ export default function Sidebar({ activePage, onPageChange, isDark, onToggleDark
         </button>
       )}
 
+      {/*메뉴, 최근 채팅 영역*/}
       <nav className="flex-1 p-2 overflow-y-auto">
+        {/*메뉴 아이템 반복 렌더링*/}
         {menuItems.map((item) => {
           const Icon = item.icon
           const isActive = activePage === item.id
@@ -105,7 +116,7 @@ export default function Sidebar({ activePage, onPageChange, isDark, onToggleDark
             </button>
           )
         })}
-
+      {/*최근 채팅 섹션*/}
         {!collapsed && (
           <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
             <button
@@ -129,35 +140,42 @@ export default function Sidebar({ activePage, onPageChange, isDark, onToggleDark
             {!chatCollapsed && (
           <div className="flex flex-col max-h-64 overflow-y-auto">
             {recentChats.map((chat) => (
-  <div
-    key={chat.room_id}
-    className="group flex items-center rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition mb-0.5"
-  >
-    <button
-      onClick={() => onRoomSelect(chat.room_id)}
-      className="flex-1 text-left px-3 py-1.5 text-xs text-gray-500 dark:text-gray-400 truncate"
-    >
-      {chat.title}
-    </button>
-    <button
-      onClick={async (e) => {
-        e.stopPropagation()
-        if (!confirm('이 대화를 삭제할까요?')) return
-        await fetch(`${BASE_URL}/api/conversations/${chat.room_id}`, { method: 'DELETE' })
-        fetchChats()
-      }}
-      className="opacity-0 group-hover:opacity-100 pr-2 transition text-gray-500 dark:text-gray-400 hover:text-red-400 dark:hover:text-red-400"
-    >
-      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-    </button>
-  </div>
-))}
-      </div>
-            )}
-          </div>
-        )}
-      </nav>
+              <div
+                key={chat.room_id}
+                className="group flex items-center rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition mb-0.5"
+              >
+                <button
+                onClick={() => onRoomSelect(chat.room_id, chat.filename ?? null)}
+                className="flex-1 text-left px-3 py-1.5 text-xs text-gray-500 dark:text-gray-400 truncate"
+              >
+              {chat.title}
+              </button>
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation()
+                    if (!confirm('이 대화를 삭제할까요?')) return
+                    await fetch(`${BASE_URL}/api/conversations/${chat.room_id}`, { method: 'DELETE' })
+                    fetchChats()
+                  }}
+                  className="opacity-0 group-hover:opacity-100 pr-2 transition text-gray-500 dark:text-gray-400 hover:text-red-400 dark:hover:text-red-400"
+                >
+                  {/*휴지통 아이콘*/}
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="3 6 5 6 21 6"/>
+                    <path d="M19 6l-1 14H6L5 6"/>
+                    <path d="M10 11v6"/><path d="M14 11v6"/>
+                    <path d="M9 6V4h6v2"/>
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </nav>
 
+      {/*다크모드  , 유저 프로필*/}
       {!collapsed && (
         <div className="p-4 border-t border-gray-100 dark:border-gray-700">
           <button
@@ -178,7 +196,7 @@ export default function Sidebar({ activePage, onPageChange, isDark, onToggleDark
           </div>
         </div>
       )}
-
+    {/*다크모드  , 유저 프로필 - 접힌 모드*/}
       {collapsed && (
         <div className="p-2 border-t border-gray-100 dark:border-gray-700 flex flex-col items-center gap-2">
           <button onClick={onToggleDark} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">

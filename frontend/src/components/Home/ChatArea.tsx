@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Send } from 'lucide-react'
 
-const BASE_URL = 'http://192.168.0.235:8000'
+const BASE_URL = import.meta.env.VITE_API_URL
 
 const suggestions = [
   '이 문서 요약해줘',
@@ -18,33 +18,31 @@ interface Message {
 
 interface Props {
   activeRoomId: string | null
-  setActiveRoomId: (id: string) => void //채팅방 ID 변경 
-  onRoomCreated: () => void //채팅방 생성 후 사이드바 갱신
+  setActiveRoomId: (id: string) => void
+  onRoomCreated: () => void
   targetFilename?: string | null
+  onGoToAnalysis?: () => void
 }
 
-export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated, targetFilename  }: Props) {
-  const [messages, setMessages] = useState<Message[]>([]) //채팅방 메시지 목록
-  const [input, setInput] = useState('') //입력창 텍스트
-  const [loading, setLoading] = useState(false) //AI 응답 대기 여부
-  const bottomRef = useRef<HTMLDivElement>(null) // 자동 스크롤
-  const abortControllerRef = useRef<AbortController | null>(null) //응답 중단
+export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated, targetFilename, onGoToAnalysis }: Props) {
+  const [messages, setMessages] = useState<Message[]>([])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
 
-  //메시지 추가 시 자동 스크롤
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  //채팅방 선택 시 대화 기록 불러오기
   useEffect(() => {
     if (!activeRoomId) {
-      setMessages([]) //채팅 없으면 초기화
+      setMessages([])
       return
     }
     fetch(`${BASE_URL}/api/conversations/${activeRoomId}/messages`)
       .then(r => r.json())
       .then(data => {
-        //백엔드 응답 형식 프론트에 맞게 변환
         const loaded = (data.messages ?? []).map((m: any) => ({
           id: m.message_id,
           role: m.role as 'user' | 'assistant',
@@ -55,7 +53,6 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
       .catch(err => console.error('기록 불러오기 실패:', err))
   }, [activeRoomId])
 
-  //새 채팅방 생성 (제목은 첫 메시지 내용)
   const createRoom = async (title: string): Promise<string> => {
     const res = await fetch(`${BASE_URL}/api/conversations`, {
       method: 'POST',
@@ -67,17 +64,13 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
     return data.room_id
   }
 
-  //메시지 전송
-  //overrideText => 제안 버튼 클릭, 없으면 입력창에서 Enter
   const handleSend = async (overrideText?: string) => {
     const userText = (overrideText ?? input).trim()
     if (!userText || loading) return
 
     setInput('')
     setLoading(true)
-    // 로딩 중인 메시지 찾기 위한 임시 ID (메시지 찾아서 실제 답변으로 교체)
     const loadingMsgId = `loading_${Date.now()}`
-    //유저 메시지 + 로딩 메시지 즉시 표시
     setMessages(prev => [
       ...prev,
       { id: `user_${Date.now()}`, role: 'user', text: userText },
@@ -85,18 +78,15 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
     ])
 
     try {
-      //채팅방 없으면 새로 만들기
       let roomId = activeRoomId
       if (!roomId) {
         roomId = await createRoom(userText)
         setActiveRoomId(roomId)
-        onRoomCreated() //사이드바 갱신
+        onRoomCreated()
       }
 
-      //응답 중단 위해 AbortController 생성
       abortControllerRef.current = new AbortController()
 
-      //AI 응답 요청
       const res = await fetch(`${BASE_URL}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -104,25 +94,22 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
           room_id: roomId,
           content: userText,
           source: 'text',
-          ...(targetFilename&& { target_filename: targetFilename}),
+          ...(targetFilename && { target_filename: targetFilename }),
         }),
-        signal: abortControllerRef.current.signal, //중단 신호 연결
+        signal: abortControllerRef.current.signal,
       })
 
       if (!res.ok) throw new Error(`HTTP error: ${res.status}`)
       const data = await res.json()
       const answerText = data.answer ?? data.error ?? '응답을 받지 못했어요.'
 
-      //로딩 메시지 -> 실제 답변으로 교체
       setMessages(prev =>
         prev.map(m => m.id === loadingMsgId ? { ...m, text: answerText } : m)
       )
     } catch (err: any) {
-      //사용자가 중단 버튼 누른 경우 - 로딩 메시지 제거
       if (err.name === 'AbortError') {
-        setMessages(prev => prev.filter(m => m.id !== loadingMsgId))}
-
-      else {
+        setMessages(prev => prev.filter(m => m.id !== loadingMsgId))
+      } else {
         console.error('API 오류:', err)
         setMessages(prev =>
           prev.map(m =>
@@ -138,11 +125,28 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
     }
   }
 
-  //메시지가 하나라도 있으면 채팅 시작 상태
   const started = messages.length > 0
 
   return (
     <div className="flex-1 flex flex-col">
+
+      {/* 분석 결과 보기 버튼 - 파일 있을 때 항상 표시 */}
+      {targetFilename && (
+  <div className="mb-3">
+    <button
+      onClick={() => {
+        console.log('버튼 클릭됨', onGoToAnalysis)
+        onGoToAnalysis?.()
+      }}
+      className="flex items-center gap-2 text-xs text-blue-500 border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/30 px-4 py-2 rounded-xl hover:bg-blue-100 dark:hover:bg-blue-900/50 transition"
+    >
+      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+      </svg>
+      📄 {targetFilename} 분석 결과 보기 →
+    </button>
+  </div>
+)}
 
       {/*채팅 시작 전 멘트*/}
       {!started && (
@@ -174,7 +178,6 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
         <div className="flex-1 overflow-y-auto flex flex-col gap-4 mb-4 pr-1">
           {messages.map((msg) => (
             <div key={msg.id} className={`group flex gap-3 items-start ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-
               {/* 아바타 */}
               <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${
                 msg.role === 'assistant' ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600'
@@ -190,16 +193,15 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
               <div className={`max-w-lg px-4 py-3 rounded-2xl text-sm leading-relaxed whitespace-pre-line ${
                 msg.role === 'assistant'
                   ? 'bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-200'
-                  : 'bg-blue-600 text-white'}`}>
-
-              {/*응답 중 애니메이션*/}
+                  : 'bg-blue-600 text-white'
+              }`}>
                 {msg.text === '...' && loading
                   ? <span className="animate-pulse text-gray-400">응답 생성 중...</span>
                   : msg.text
                 }
               </div>
 
-              {/*삭제 버튼(hover 시 표시)*/}
+              {/*삭제 버튼*/}
               <button
                 onClick={async () => {
                   if (!confirm('이 메시지를 삭제할까요?')) return
@@ -220,13 +222,11 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
               </button>
             </div>
           ))}
-
-          {/*자동 스크롤 타켓*/}
           <div ref={bottomRef} />
         </div>
       )}
 
-      {/*채팅 중 빠른 제안 질문 버트*/}
+      {/*채팅 중 빠른 제안 질문 버튼*/}
       {started && (
         <div className="flex gap-2 mb-3 flex-wrap">
           {suggestions.map((s, i) => (
@@ -241,6 +241,7 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
         </div>
       )}
 
+      {/*입력창, 전송/중단 버튼*/}
       <div className="flex gap-2 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-2xl p-2 shadow-sm">
         <textarea
           value={input}

@@ -1,16 +1,17 @@
 import { useState, useEffect, createContext, useContext } from 'react'
 import Sidebar from './components/layout/Sidebar'
+
 import Home from './pages/Home'
-import Analysis from './pages/DocumentAnalysis'
+import Documents from './pages/Documents'
+import DocumentAnalysis from './pages/DocumentAnalysis'
 import Tasks from './pages/Tasks'
 import Settings from './pages/Settings'
 import Pipeline from './pages/Pipeline'
 import Graph from './pages/Graph'
-import Documents from './pages/Documents'
+import Voice from './pages/Voice'
 import VoiceAnalysis from './pages/VoiceAnalysis'
 
 type ToastType = 'success' | 'error' | 'info'
-
 interface ToastContextType {
   showToast: (message: string, type?: ToastType) => void
 }
@@ -20,17 +21,27 @@ export const useToast = () => useContext(ToastContext)
 
 export default function App() {
   const [activePage, setActivePage] = useState('home')
-  const [isDark, setIsDark] = useState(false)
-  const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null)
-  const [selectedChatId, setSelectedChatId] = useState<number | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [selectedDocId, setSelectedDocId] = useState<number | null>(null)
-  const [docViewMode, setDocViewMode] = useState<'list' | 'original' | 'analysis'>('list')
+
+  const [isDark, setIsDark] = useState(false)
+
+  const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null)
+
+  const [selectedChatId, setSelectedChatId] = useState<number | null>(null)
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(null)
+  const [targetRoomId, setTargetRoomId] = useState<string | null>(null)
+  const [targetFilename, setTargetFilename] = useState<string | null>(null)
+
   const [reviewFileName, setReviewFileName] = useState<string | null>(null)
   const [sidebarRefreshKey, setSidebarRefreshKey] = useState(0)
-  const [activeRoomId, setActiveRoomId] = useState<string | null>(null)
-  const [targetFilename, setTargetFilename] = useState<string | null>(null)
-  const [targetRoomId, setTargetRoomId] = useState<string | null>(null)
+  
+  const [voicePage, setVoicePage] = useState<'list' | 'result'>('list')
+  const [selectedVoiceId, setSelectedVoiceId] = useState<string | null>(null)
+
+  const [docViewMode, setDocViewMode] = useState<'list' | 'original' | 'analysis'>('list')
+  const [selectedDocId, setSelectedDocId] = useState<number | null>(null)
+
+
 
   useEffect(() => {
     if (isDark) {
@@ -54,21 +65,40 @@ export default function App() {
         onSelectRoom={(room_id) => setActiveRoomId(room_id)}
         activeRoomId={activeRoomId}
         setActiveRoomId={setActiveRoomId}
-        targetFilename={targetFilename}  // 추가
+        targetFilename={targetFilename}
+        onGoToAnalysis={() => setActivePage('documentanalysis')}  
       />
     )
       case 'pipeline': return (
         <Pipeline
-        onGoToAnalysis={() => setActivePage('analysis')}
+        onGoToAnalysis={() => setActivePage('documentanalysis')}
         reviewFileName={reviewFileName}
         onClearReview={() => setReviewFileName(null)}
         onRoomCreated={() => setSidebarRefreshKey(prev => prev + 1)}
-        onFileUploaded={(filename) => setTargetFilename(filename)}
+        onFileUploaded={(filename) => {
+          console.log('파일명 세팅:',filename)
+          setTargetFilename(filename)
+        }}
         onRoomIdCreated={(roomId) => setTargetRoomId(roomId)}
       />
-    )
-      case 'analysis': return (
-        <Analysis
+      )
+      case 'documents': return (
+  <Documents
+    selectedDocId={selectedDocId}
+    docViewMode={docViewMode}
+    onNameClick={(id) => {
+      setSelectedDocId(id)
+      setDocViewMode('original')
+    }}
+    onAnalysisClick={(id) => {
+      setSelectedDocId(id)
+      setDocViewMode('analysis')
+    }}
+    onBack={() => setDocViewMode('list')}
+  />
+)
+      case 'documentanalysis': return (
+        <DocumentAnalysis
         onReview={() => {
           setReviewFileName('마케팅 전략 회의.pdf')
           setActivePage('home')
@@ -78,50 +108,46 @@ export default function App() {
           setActiveRoomId(targetRoomId)
           setActivePage('home')
         }}
+        onBack={()=>setActivePage('pipeline')}
       />
     )
       case 'tasks': return <Tasks />
       case 'settings': return <Settings />
-      case 'graph': return <Graph onGoToAnalysis={() => setActivePage('analysis')} />
-      case 'documents': return (
-        <Documents
-          selectedDocId={selectedDocId}
-          docViewMode={docViewMode}
-          onNameClick={(id) => { setSelectedDocId(id); setDocViewMode('original') }}
-          onAnalysisClick={(id) => { setSelectedDocId(id); setDocViewMode('analysis') }}
-          onBack={() => { setSelectedDocId(null); setDocViewMode('list') }}
-        />
-      )
-      case 'voice': return (
-  <VoiceAnalysis onReview={() => {}} />  // 일단 이렇게만 해도 됨
-)
-      default: return (
-        <div className="flex items-center justify-center h-full">
-          <p className="text-gray-400 text-sm">준비 중인 페이지예요 😊</p>
-        </div>
-      )
+      case 'graph': return <Graph onGoToAnalysis={() => setActivePage('documentanalysis')} />
+      case 'voice' : return voicePage === 'result'
+        ?<VoiceAnalysis
+            fileId={selectedVoiceId!}
+            onBack={() => setVoicePage('list')}
+          />
+        : <Voice
+            onAnalyze={(id) => {
+              setSelectedVoiceId(id)
+              setVoicePage('result')
+            }}
+          />
     }
   }
 
   return (
     <ToastContext.Provider value={{ showToast }}>
       <div className="bg-gray-50 dark:bg-[#1c1a1a] min-h-screen flex transition-colors duration-300">
-<Sidebar
-  refreshKey={sidebarRefreshKey}
-  activePage={activePage}
-  onPageChange={setActivePage}
-  isDark={isDark}
-  onToggleDark={() => setIsDark(!isDark)}
-  onChatSelect={(id) => {
-    setSelectedChatId(id)
-    setActivePage('home')
-  }}
-  onCollapse={(v) => setSidebarCollapsed(v)}
-  onRoomSelect={(room_id) => {
-    setActiveRoomId(room_id)
-    setActivePage('home')
-  }}
-/>
+        <Sidebar
+        refreshKey={sidebarRefreshKey}
+        activePage={activePage}
+        onPageChange={setActivePage}
+        isDark={isDark}
+        onToggleDark={() => setIsDark(!isDark)}
+        onChatSelect={(id) => {
+          setSelectedChatId(id)
+          setActivePage('home')
+        }}
+        onCollapse={(v) => setSidebarCollapsed(v)}
+        onRoomSelect={(room_id, filename) => {
+          setActiveRoomId(room_id)
+          setTargetFilename(filename)
+          setActivePage('home')
+        }}
+      />
         <main className={`${sidebarCollapsed ? 'ml-14' : 'ml-52'} flex-1 p-6 transition-all duration-300`}>
           {renderPage()}
         </main>

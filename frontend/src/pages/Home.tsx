@@ -1,4 +1,4 @@
-import ChatArea from '../components/home/ChatArea'
+import ChatArea from '../components/Home/ChatArea'
 
 interface HomeProps {
   selectedChatId: number | null
@@ -7,9 +7,10 @@ interface HomeProps {
   activeRoomId: string | null
   setActiveRoomId: (id: string | null) => void
   targetFilename: string | null
+  onGoToAnalysis?: () => void
 }
 
-export default function Home({ selectedChatId, onRoomCreated, onSelectRoom, activeRoomId, setActiveRoomId, targetFilename }: HomeProps) {
+export default function Home({ onRoomCreated, activeRoomId, setActiveRoomId, targetFilename, onGoToAnalysis }: HomeProps) {
   return (
     <div className="flex flex-col h-[calc(100vh-48px)]">
       <div className="flex items-center justify-between mb-4">
@@ -30,6 +31,7 @@ export default function Home({ selectedChatId, onRoomCreated, onSelectRoom, acti
           setActiveRoomId={setActiveRoomId}
           onRoomCreated={onRoomCreated}
           targetFilename={targetFilename}
+          onGoToAnalysis={onGoToAnalysis}
         />
       </div>
     </div>
