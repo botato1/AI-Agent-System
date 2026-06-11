@@ -1,7 +1,7 @@
 import os
 import json
 import subprocess
-from core.config import WHISPER_CLI, WHISPER_MODEL, logger
+from ..core.config import WHISPER_CLI, WHISPER_MODEL, logger
 
 def run_whisper_stt(wav_path: str, topic: str = "") -> dict:
     """Whisper.cpp를 실행하고 추출된 텍스트/타임스탬프 데이터를 반환합니다."""

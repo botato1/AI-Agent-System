@@ -1,6 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, Form
-from services.pipeline import process_audio_pipeline
-from utils.file_handler import save_upload_file
+from ..services.pipeline import process_audio_pipeline
+from ..utils.file_handler import save_upload_file
 
 router = APIRouter()
 

@@ -1,7 +1,7 @@
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from core.config import logger
+from .core.config import logger
 from routers import stt
 
 # FastAPI 앱 초기화

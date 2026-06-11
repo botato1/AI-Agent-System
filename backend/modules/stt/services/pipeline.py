@@ -1,7 +1,7 @@
-from services.stt_service import run_whisper_stt
-from services.diarize_service import run_diarization
-from utils.file_handler import cleanup_files
-from core.config import logger
+from .stt_service import run_whisper_stt
+from .diarize_service import run_diarization
+from ..utils.file_handler import cleanup_files
+from ..core.config import logger
 
 def process_audio_pipeline(wav_path: str, topic: str = "") -> list:
     """STT와 화자 분리를 실행하고 데이터를 병합하는 메인 파이프라인"""
