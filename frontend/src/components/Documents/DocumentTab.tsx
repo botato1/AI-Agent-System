@@ -1,7 +1,7 @@
+//문서보관함 탭
 import { useState } from 'react'
-import { Search, Upload, Grid, List } from 'lucide-react'
+import { Search, Grid, List } from 'lucide-react'
 import { files, FILTERS } from '../../data/documentsData'
-import type { FileItem } from '../../data/documentsData'
 import DocumentCard from './DocumentCard'
 
 type Props = {
@@ -49,18 +49,18 @@ export default function DocumentTab({ onNameClick, onAnalysisClick }: Props) {
           ))}
         </div>
 
-        <div className="flex bg-gray-100 rounded-lg p-0.5">
+        <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-0.5">
           <button
             onClick={() => setViewMode('list')}
-            className={`p-1.5 rounded-md transition ${viewMode === 'list' ? 'bg-white shadow-sm' : ''}`}
+            className={`p-1.5 rounded-md transition ${viewMode === 'list' ? 'bg-white dark:bg-gray-600 shadow-sm' : ''}`}
           >
-            <List size={14} className={viewMode === 'list' ? 'text-gray-700' : 'text-gray-400'} />
+            <List size={14} className={viewMode === 'list' ? 'text-gray-700 dark:text-gray-200' : 'text-gray-400'} />
           </button>
           <button
-            onClick={() => setViewMode('grid')}
-            className={`p-1.5 rounded-md transition ${viewMode === 'grid' ? 'bg-white shadow-sm' : ''}`}
+              onClick={() => setViewMode('grid')}
+              className={`p-1.5 rounded-md transition ${viewMode === 'grid' ? 'bg-white dark:bg-gray-600 shadow-sm' : ''}`}
           >
-            <Grid size={14} className={viewMode === 'grid' ? 'text-gray-700' : 'text-gray-400'} />
+            <Grid size={14} className={viewMode === 'grid' ? 'text-gray-700 dark:text-gray-200' : 'text-gray-400'} />
           </button>
         </div>
       </div>

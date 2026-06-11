@@ -16,9 +16,9 @@ export const voices: VoiceItem[] = [
 ]
 
 export const typeColors: Record<string, string> = {
-  WAV:  'bg-red-100 text-red-500 dark:bg-red-900/30 dark:text-red-400',
-  MP3: 'bg-blue-100 text-blue-500 dark:bg-blue-900/30 dark:text-blue-400',
-  M4A:  'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300',
+  WAV: 'bg-indigo-50 text-[#818cf8] dark:bg-[#222] dark:text-[#818cf8]',
+  MP3: 'bg-emerald-50 text-[#34d399] dark:bg-[#222] dark:text-[#34d399]',
+  M4A: 'bg-orange-50 text-[#fb923c] dark:bg-[#222] dark:text-[#fb923c]',
 }
 
 export const FILTERS = ['전체', 'WAV', 'MP3', 'M4A'] as const

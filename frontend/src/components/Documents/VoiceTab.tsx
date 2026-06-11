@@ -1,3 +1,4 @@
+//문서보관함 - 음성 파일 목록
 import { useState } from 'react'
 import { Search, Grid, List, Mic } from 'lucide-react'
 import { voices, FILTERS } from '../../data/voiceData'
@@ -8,9 +9,9 @@ type Props = {
 }
 
 const typeColors: Record<string, string> = {
-  WAV: 'bg-blue-100 text-blue-500',
-  MP3: 'bg-purple-100 text-purple-500',
-  M4A: 'bg-green-100 text-green-500',
+  WAV: 'text-[#818cf8]',
+  MP3: 'text-[#34d399]',
+  M4A: 'text-[#fb923c]',
 }
 
 export default function VoiceTab({ onNameClick, onAnalysisClick }: Props) {
@@ -82,7 +83,7 @@ export default function VoiceTab({ onNameClick, onAnalysisClick }: Props) {
           {filtered.map((voice) => (
             <div key={voice.id} className="grid grid-cols-12 px-4 py-3 border-b border-gray-50 dark:border-gray-700 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-700 transition items-center">
               <div className="col-span-4 flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center border border-blue-300 dark:border-blue-800 text-blue-400 dark:text-blue-700">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center border border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500">
                   <Mic size={16} />
                 </div>
                 <button
@@ -93,7 +94,7 @@ export default function VoiceTab({ onNameClick, onAnalysisClick }: Props) {
                 </button>
               </div>
               <div className="col-span-2">
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${typeColors[voice.type]}`}>
+                <span className={`text-xs font-medium ${typeColors[voice.type]}`}>
                   {voice.type}
                 </span>
               </div>
@@ -117,7 +118,7 @@ export default function VoiceTab({ onNameClick, onAnalysisClick }: Props) {
         <div className="grid grid-cols-3 gap-4">
           {filtered.map((voice) => (
             <div key={voice.id} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4 hover:border-blue-200 dark:hover:border-blue-700 transition">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center mb-3 border border-blue-300 dark:border-blue-800 text-blue-400 dark:text-blue-700">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center mb-3 border border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500">
                 <Mic size={18} />
               </div>
               <button
@@ -127,7 +128,7 @@ export default function VoiceTab({ onNameClick, onAnalysisClick }: Props) {
                 {voice.name}
               </button>
               <div className="flex items-center justify-between mt-1">
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${typeColors[voice.type]}`}>
+                <span className={`text-xs font-medium ${typeColors[voice.type]}`}>
                   {voice.type}
                 </span>
                 <span className="text-xs text-gray-400 dark:text-gray-500">{voice.duration}</span>

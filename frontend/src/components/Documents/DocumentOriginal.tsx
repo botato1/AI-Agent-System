@@ -1,3 +1,4 @@
+//문서보관함 원본 보기
 import { ArrowLeft, FileText, File } from 'lucide-react'
 import type { FileItem } from '../../data/documentsData'
 
@@ -48,31 +49,31 @@ export default function DocumentOriginal({ file, onBack }: Props) {
       <div className="flex items-center gap-3 mb-5">
         <button
           onClick={onBack}
-          className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-700 transition"
+          className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition"
         >
           <ArrowLeft size={16} /> 목록으로
         </button>
-        <span className="text-gray-200">|</span>
+        <span className="text-gray-200 dark:text-gray-700">|</span>
         <div className="flex items-center gap-2">
           <FileText size={15} className="text-gray-400" />
-          <h1 className="text-sm font-medium text-gray-700">{file.name}</h1>
+          <h1 className="text-sm font-medium text-gray-700 dark:text-gray-200">{file.name}</h1>
         </div>
-        <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-400 ml-auto">
+        <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-400 ml-auto">
           원본 파일
         </span>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-100 p-8 min-h-[500px]">
-        <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
-          <div className="w-10 h-10 rounded-xl bg-red-50 flex items-center justify-center">
+      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-600 p-8 min-h-[500px]">
+        <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100 dark:border-gray-700">
+          <div className="w-10 h-10 rounded-xl bg-red-50 dark:bg-red-900/30 flex items-center justify-center">
             <File size={18} className="text-red-400" />
           </div>
           <div>
-            <p className="text-sm font-medium text-gray-700">{file.name}</p>
-            <p className="text-xs text-gray-400">{file.size} · {file.date}</p>
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{file.name}</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500">{file.size} · {file.date}</p>
           </div>
         </div>
-        <pre className="text-sm text-gray-700 leading-7 whitespace-pre-wrap font-sans">
+        <pre className="text-sm text-gray-700 dark:text-gray-300 leading-7 whitespace-pre-wrap font-sans">
           {content}
         </pre>
       </div>

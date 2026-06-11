@@ -17,19 +17,16 @@ export const files: FileItem[] = [
 ]
 
 export const iconColors: Record<string, string> = {
-  pdf:  'bg-red-50 text-red-400 dark:bg-red-900/30 dark:text-red-400',
-  docx: 'bg-blue-50 text-blue-400 dark:bg-blue-900/30 dark:text-blue-400',
-  txt:  'bg-gray-50 text-gray-400 dark:bg-gray-700 dark:text-gray-300',
+  pdf:  'bg-indigo-50 text-[#818cf8] dark:bg-[#222] dark:text-[#818cf8]',
+  docx: 'bg-emerald-50 text-[#34d399] dark:bg-[#222] dark:text-[#34d399]',
+  txt:  'bg-orange-50 text-[#fb923c] dark:bg-[#222] dark:text-[#fb923c]',
 }
 
 
 export const typeColors: Record<string, string> = {
-  PDF:  'bg-red-100 text-red-500 dark:bg-red-900/30 dark:text-red-400',
-  DOCX: 'bg-blue-100 text-blue-500 dark:bg-blue-900/30 dark:text-blue-400',
-  TXT:  'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300',
+  PDF:  'text-[#818cf8]',
+  DOCX: 'text-[#34d399]',
+  TXT:  'text-[#fb923c]',
 }
-
-
-
 
 export const FILTERS = ['전체', 'PDF', 'DOCX', 'TXT'] as const
