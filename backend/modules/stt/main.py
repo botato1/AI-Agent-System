@@ -31,4 +31,4 @@ async def root():
 if __name__ == "__main__":
     logger.info("서버를 시작합니다...")
     # 개발 모드 실행 (코드 변경 시 자동 재시작)
-    uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
