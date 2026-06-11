@@ -7,6 +7,7 @@ WORKDIR /app
 # 시스템 패키지 설치 (필요한 경우)
 RUN apt-get update && apt-get install -y \
     gcc \
+    curl \ 
     && rm -rf /var/lib/apt/lists/*
 
 # requirements.txt 먼저 복사 후 패키지 설치
@@ -23,7 +24,7 @@ RUN mkdir -p storage/sqlite storage/uploads
 # 포트 개방
 EXPOSE 8000
 
-# 서버 실행 (운영 환경용 워커 4개)
+# 서버 실행 (운영 환경용 워커 4개) @@@@@#예시# 서버 GPU환경 확인 필요@@@@@@@@@
 CMD ["uvicorn", "backend.main:app", \
      "--host", "0.0.0.0", \
      "--port", "8000", \
