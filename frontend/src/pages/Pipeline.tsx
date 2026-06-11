@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Upload, FileText, CheckCircle, Circle, Loader, AlertCircle } from 'lucide-react'
 
-const BASE_URL = 'http://192.168.0.235:8000'
+const BASE_URL = import.meta.env.VITE_API_URL
 
 const steps = [
   { id: 1, label: '입력 처리', desc: '음성/텍스트/PDF/이미지 분석', detail: 'Whisper STT · PyMuPDF · Tesseract OCR' },
@@ -31,6 +31,7 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
   const [logs, setLogs] = useState<string[]>([])
   const [isRunning, setIsRunning] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [prompt, setPrompt] = useState('')
 
   const addLog = (msg: string) => {
     setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`])
@@ -69,10 +70,11 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
       })
       if (!uploadRes.ok) throw new Error('문서 업로드 실패')
       const uploadData = await uploadRes.json()
+      console.log('업로드 응답:', uploadData)
+      onFileUploaded?.(uploadData.filename)
       addLog(`업로드 완료: ${uploadData.filename}`)
 
-      // 파일명 전달 + 사이드바 갱신 + 홈으로 이동
-      onFileUploaded?.(uploadData.filename)
+      // 파일명 전달 + 사이드바 갱신
       setTimeout(() => onRoomCreated?.(), 1000)
 
       // 3. 파이프라인 시작
@@ -167,6 +169,7 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
 
       <div className="grid grid-cols-2 gap-6">
         <div className="flex flex-col gap-4">
+
           {reviewFileName && !file && (
             <div className="flex items-center justify-between bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl px-4 py-3">
               <div className="flex items-center gap-2">
@@ -183,6 +186,7 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
             </div>
           )}
 
+          {/* 업로드 영역 */}
           {!file ? (
             <div
               onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
@@ -222,6 +226,32 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
             </div>
           )}
 
+          {/* 초기 분석 프롬프트 */}
+          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-600 p-4">
+            <h3 className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">초기 분석 프롬프트</h3>
+            <p className="text-xs text-gray-400 dark:text-gray-500 mb-3">
+              AI가 분석 시 참고할 맥락이나 요청 사항을 입력하세요
+            </p>
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="예) 이 문서에서 핵심 액션 아이템과 담당자를 중심으로 요약해줘. 일정 관련 내용을 특히 강조해줘."
+              className="w-full resize-none text-sm bg-gray-100 dark:bg-[#161616] border border-gray-200 dark:border-gray-700 rounded-lg p-3 text-gray-700 dark:text-gray-300 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-400 min-h-[100px]"
+            />
+            <div className="flex justify-end gap-2 mt-3">
+              <button
+                onClick={() => setPrompt('')}
+                className="px-4 py-1.5 text-xs text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+              >
+                초기화
+              </button>
+              <button className="px-4 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
+                저장
+              </button>
+            </div>
+          </div>
+
+          {/* 처리 단계 */}
           <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
             <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-4 uppercase tracking-wider">처리 단계</h3>
             <div className="flex flex-col">
@@ -249,25 +279,30 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
         </div>
 
         <div className="flex flex-col gap-4">
-          <div className="bg-gray-900 rounded-xl p-4 flex-1 min-h-96">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-3 h-3 rounded-full bg-red-400" />
-              <div className="w-3 h-3 rounded-full bg-yellow-400" />
-              <div className="w-3 h-3 rounded-full bg-green-400" />
-              <span className="text-xs text-gray-500 ml-2">Agent 실행 로그</span>
-            </div>
-            <div className="flex flex-col gap-1.5 overflow-y-auto max-h-80">
-              {logs.length === 0 ? (
-                <p className="text-xs text-gray-600">파일을 업로드하면 로그가 표시됩니다...</p>
-              ) : (
-                logs.map((log, i) => (
-                  <p key={i} className={`text-xs font-mono ${log.includes('완료') ? 'text-green-400' : log.includes('오류') ? 'text-red-400' : 'text-gray-300'}`}>
-                    {log}
-                  </p>
-                ))
-              )}
-            </div>
-          </div>
+          <div className="bg-gray-900 rounded-xl p-4">
+  <div className="flex items-center gap-2 mb-3">
+    <div className="w-3 h-3 rounded-full bg-red-400" />
+    <div className="w-3 h-3 rounded-full bg-yellow-400" />
+    <div className="w-3 h-3 rounded-full bg-green-400" />
+    <span className="text-xs text-gray-500 ml-2">Agent 실행 로그</span>
+  </div>
+
+  <div className="flex flex-col gap-1.5 overflow-y-auto transition-all duration-300"
+    style={{ minHeight: '500px', 
+             maxHeight: '320px',
+             height: logs.length === 0 ? '40px' : `${Math.min(logs.length * 24 + 16, 320)}px` }}>
+
+      {logs.length === 0 ? (
+        <p className="text-xs text-gray-600">파일을 업로드하면 로그가 표시됩니다...</p>
+      ) : (
+        logs.map((log, i) => (
+          <p key={i} className={`text-xs font-mono ${log.includes('완료') ? 'text-green-400' : log.includes('오류') ? 'text-red-400' : 'text-gray-300'}`}>
+            {log}
+          </p>
+        ))
+      )}
+    </div>
+  </div>
 
           {doneCount === 6 && (
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-blue-100 dark:border-blue-800 p-4">

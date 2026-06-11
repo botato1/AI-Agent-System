@@ -21,9 +21,10 @@ const tabs = ['요약', '전체 문서', 'Task', '연관 문서']
 interface AnalysisProps {
   onReview: () => void  //검토하기
   onGoToChat?: () => void //채팅으로 이동
+  onBack?: () => void 
 }
 
-export default function Analysis({ onReview, onGoToChat  }: AnalysisProps) {
+export default function Analysis({ onReview, onGoToChat, onBack }: AnalysisProps) {
   const { showToast } = useToast()
   const [activeTab, setActiveTab] = useState(0) //활성화 탭 기본은 요약 탭
 
@@ -90,7 +91,7 @@ const renderTab = () => {
     <div id="analysis-content">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <button className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+          <button onClick={onBack} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
             <ArrowLeft size={16} className="text-gray-500 dark:text-gray-400" />
           </button>
           <div>
@@ -115,7 +116,7 @@ const renderTab = () => {
             <Share2 size={13} /> 공유하기
           </button>
           <button onClick={onGoToChat} className="flex items-center gap-1.5 text-xs text-white bg-green-600 px-3 py-1.5 rounded-lg hover:bg-green-700">
-          채팅으로 이동 →
+          채팅 →
           </button>
         </div>
       </div>

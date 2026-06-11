@@ -4,6 +4,11 @@ const relatedDocs = [
   { name: 'A/B 테스트 결과 보고서.pdf', similarity: 78, date: '2024.04.10', type: 'PDF' },
 ]
 
+const typeColor: Record<string, string> = {
+  PDF: 'text-[#818cf8]',
+  DOCX: 'text-[#34d399]',
+}
+
 export default function TabRelated() {
   return (
     <div className="flex flex-col gap-4">
@@ -12,11 +17,9 @@ export default function TabRelated() {
         <div className="flex flex-col gap-3">
           {relatedDocs.map((doc, i) => (
             <div key={i} className="flex items-center gap-4 p-3 rounded-lg bg-gray-50 dark:bg-gray-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition cursor-pointer">
-              <div className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${
-                doc.type === 'PDF' ? 'bg-red-100 text-red-500' : 'bg-blue-100 text-blue-500'
-              }`}>
+              <span className={`text-xs font-medium flex-shrink-0 ${typeColor[doc.type]}`} style={{ color: doc.type === 'PDF' ? '#818cf8' : '#34d399' }}>
                 {doc.type}
-              </div>
+              </span>
               <div className="flex-1 min-w-0">
                 <p className="text-sm text-gray-700 dark:text-gray-200 truncate">{doc.name}</p>
                 <p className="text-xs text-gray-400 mt-0.5">{doc.date}</p>
