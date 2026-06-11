@@ -74,14 +74,14 @@ def get_chat_rooms():
             "title": row["title"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
+            "filename": row.get("filename"),
         }
         for row in rows
     ]
 
     return {
-        "conversations": conversations,
+        "conversations": conversations
     }
-
 
 # 채팅방 단건 조회 API
 @router.get("/conversations/{room_id}")
