@@ -1,6 +1,5 @@
 from backend.schemas.agent_schema import AgentState
 from backend.services.ollama_service import ollama_service
-from backend.db.crud import save_tasks
 
 
 # LangGraph에서 회의록/문서 기반 할 일 추출을 담당하는 노드
@@ -40,26 +39,12 @@ def task_node(state: AgentState) -> AgentState:
         }
 
     try:
+        # 회의록/문서/메모리 내용에서 할 일 추출
         tasks = ollama_service.extract_tasks_from_content(source_content)
 
-        room_id = state.get("room_id") or ""
-
-        document_id = (
-            state.get("target_document_id")
-            or document_json.get("id")
-            or document_json.get("chroma_id")
-            or state.get("target_filename")
-            or "unknown_document"
-        )
-
-        # 추출된 할 일이 있으면 tasks 테이블에 저장
-        if tasks:
-            save_tasks(
-                tasks=tasks,
-                document_id=document_id,
-                conversation_id=room_id,
-            )
-
+        # 로그인 기능이 없는 현재 구조에서는 현재 사용자를 식별할 수 없으므로
+        # 추출된 전체 담당자 업무를 자동 저장하지 않는다.
+        # 실제 저장은 사용자가 선택한 업무만 POST /api/tasks로 처리한다.
         return {
             **state,
             "tasks": tasks,
