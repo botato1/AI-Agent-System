@@ -1,6 +1,7 @@
 # 문서 업로드 및 처리 서비스
 from pathlib import Path
 from fastapi import UploadFile
+import httpx
 
 from backend.modules.rag.document_loader import load_and_insert
 from backend.db.crud import ensure_conversation, save_document_metadata
@@ -23,11 +24,9 @@ def is_allowed_document_file(file: UploadFile) -> bool:
     filename = file.filename or ""
     suffix = Path(filename).suffix.lower()
 
-    # 1. 문서/이미지 파일은 확장자로 검사
     if suffix in ALLOWED_DOCUMENT_EXTENSIONS:
         return True
 
-    # 2. 음성 파일은 MIME 타입으로 검사
     if file.content_type and file.content_type.startswith("audio/"):
         return True
 
@@ -98,6 +97,7 @@ async def upload_and_process_document(file: UploadFile, room_id: str) -> dict:
         suffix = Path(filename).suffix.lower()
         document_type = _get_document_type(filename, file.content_type)
         source = _get_source(filename, file.content_type)
+        stt_result = None
 
         if suffix == ".pdf":
             load_and_insert(str(save_path))
@@ -107,7 +107,19 @@ async def upload_and_process_document(file: UploadFile, room_id: str) -> dict:
             message = "이미지 업로드 완료, OCR 처리는 추후 연동 예정"
 
         elif file.content_type and file.content_type.startswith("audio/"):
-            message = "음성 파일 업로드 완료, Whisper 처리는 추후 연동 예정"
+            try:
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    with open(save_path, "rb") as audio_file:
+                        response = await client.post(
+                            "http://192.168.0.245:8001/api/v1/stt",
+                            files={"file": (filename, audio_file, file.content_type)},
+                            data={"topic": ""},
+                        )
+                stt_result = response.json()
+                message = "음성 파일 STT 처리 완료"
+            except Exception as stt_error:
+                stt_result = None
+                message = f"음성 업로드 완료, STT 처리 실패: {str(stt_error)}"
 
         else:
             message = "파일 업로드 완료"
@@ -122,7 +134,7 @@ async def upload_and_process_document(file: UploadFile, room_id: str) -> dict:
             "type": document_type,
             "source": source,
             "file_path": str(save_path),
-            "summary": "",
+            "summary": str(stt_result) if stt_result else "",
             "status": "processed",
             "notion_url": "",
             "error": "",
