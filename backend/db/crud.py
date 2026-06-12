@@ -46,6 +46,7 @@ def create_conversation(title: str) -> str:
 
     return conv_id
 
+
 # 채팅방이 없으면 생성하고, 있으면 updated_at을 갱신하는 함수
 def ensure_conversation(conversation_id: str, title: str = "새 채팅"):
     now = get_utc_now()
@@ -132,7 +133,7 @@ def get_conversations() -> list:
         """
     )
 
-    rows = cursor.fetchall()
+    rows = cursor.fetchall() or []
     conn.close()
 
     return [dict(row) for row in rows]
@@ -266,7 +267,7 @@ def get_messages(conversation_id: str) -> list:
         (conversation_id,),
     )
 
-    rows = cursor.fetchall()
+    rows = cursor.fetchall() or []
     conn.close()
 
     return [dict(row) for row in rows]
@@ -379,7 +380,7 @@ def get_all_facts(conversation_id: str) -> list:
         (conversation_id,),
     )
 
-    rows = cursor.fetchall()
+    rows = cursor.fetchall() or []
     conn.close()
 
     return [dict(row) for row in rows]
@@ -451,7 +452,7 @@ def get_documents(conversation_id: str) -> list:
         (conversation_id,),
     )
 
-    rows = cursor.fetchall()
+    rows = cursor.fetchall() or []
     conn.close()
 
     return [dict(row) for row in rows]
@@ -469,21 +470,23 @@ def save_tasks(tasks: list, document_id: str, conversation_id: str):
     cursor = conn.cursor()
 
     for task in tasks:
-        task_id = task.get("task_id", str(uuid.uuid4()))
+        # LLM이 반환한 "0001", "0002" 같은 task_id는 중복될 수 있으므로
+        # DB 저장용 id는 항상 UUID로 새로 생성한다.
+        task_id = str(uuid.uuid4())
 
         cursor.execute(
             """
             INSERT INTO tasks
             (
-            id,
-            document_id,
-            conversation_id,
-            task,
-            assignee,
-            deadline,
-            status,
-            priority,
-            created_at
+                id,
+                document_id,
+                conversation_id,
+                task,
+                assignee,
+                deadline,
+                status,
+                priority,
+                created_at
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
@@ -502,6 +505,7 @@ def save_tasks(tasks: list, document_id: str, conversation_id: str):
 
     conn.commit()
     conn.close()
+
 
 # 전체 업무 목록을 조회하는 함수
 def get_all_tasks() -> list:
@@ -529,6 +533,7 @@ def get_all_tasks() -> list:
     conn.close()
 
     return [dict(row) for row in rows]
+
 
 # 단일 task 생성 함수
 def create_task(task_data: dict) -> dict:
@@ -582,6 +587,7 @@ def create_task(task_data: dict) -> dict:
         "created_at": now,
     }
 
+
 # 특정 업무 상태를 변경하는 함수
 def update_task_status(task_id: str, status: str) -> bool:
     conn = get_connection()
@@ -602,6 +608,7 @@ def update_task_status(task_id: str, status: str) -> bool:
     conn.close()
 
     return updated_count > 0
+
 
 # 특정 업무 우선순위를 변경하는 함수
 def update_task_priority(task_id: str, priority: str) -> bool:
@@ -624,6 +631,7 @@ def update_task_priority(task_id: str, priority: str) -> bool:
 
     return updated_count > 0
 
+
 # 특정 업무를 삭제하는 함수
 def delete_task(task_id: str) -> bool:
     conn = get_connection()
@@ -644,6 +652,7 @@ def delete_task(task_id: str) -> bool:
 
     return deleted_count > 0
 
+
 # 채팅방 기준 할 일 목록을 조회하는 함수
 def get_tasks(conversation_id: str) -> list:
     conn = get_connection()
@@ -651,7 +660,7 @@ def get_tasks(conversation_id: str) -> list:
 
     cursor.execute(
         """
-        SELECT id, task, assignee, deadline, status, created_at
+        SELECT id, task, assignee, deadline, status, priority, created_at
         FROM tasks
         WHERE conversation_id = ?
         ORDER BY created_at DESC

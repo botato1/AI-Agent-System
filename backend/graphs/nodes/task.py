@@ -1,5 +1,6 @@
 from backend.schemas.agent_schema import AgentState
 from backend.services.ollama_service import ollama_service
+from backend.db.crud import save_tasks
 
 
 # LangGraph에서 회의록/문서 기반 할 일 추출을 담당하는 노드
@@ -40,6 +41,24 @@ def task_node(state: AgentState) -> AgentState:
 
     try:
         tasks = ollama_service.extract_tasks_from_content(source_content)
+
+        room_id = state.get("room_id") or ""
+
+        document_id = (
+            state.get("target_document_id")
+            or document_json.get("id")
+            or document_json.get("chroma_id")
+            or state.get("target_filename")
+            or "unknown_document"
+        )
+
+        # 추출된 할 일이 있으면 tasks 테이블에 저장
+        if tasks:
+            save_tasks(
+                tasks=tasks,
+                document_id=document_id,
+                conversation_id=room_id,
+            )
 
         return {
             **state,
