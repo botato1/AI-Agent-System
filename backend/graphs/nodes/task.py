@@ -39,8 +39,12 @@ def task_node(state: AgentState) -> AgentState:
         }
 
     try:
+        # 회의록/문서/메모리 내용에서 할 일 추출
         tasks = ollama_service.extract_tasks_from_content(source_content)
 
+        # 로그인 기능이 없는 현재 구조에서는 현재 사용자를 식별할 수 없으므로
+        # 추출된 전체 담당자 업무를 자동 저장하지 않는다.
+        # 실제 저장은 사용자가 선택한 업무만 POST /api/tasks로 처리한다.
         return {
             **state,
             "tasks": tasks,
