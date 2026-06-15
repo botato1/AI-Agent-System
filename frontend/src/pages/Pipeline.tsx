@@ -73,18 +73,22 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
       addLog(`문서 처리 완료: ${uploadData.filename}`)
 
       // 3. 메타데이터 저장 (8000)
-      addLog('메타데이터 저장 중...')
-      const metaRes = await fetch(`${BASE_URL}/api/documents/metadata`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          document_id: uploadData.document_id,
-          room_id: roomId,
-          filename: uploadData.filename,
-        }),
-      })
-      if (!metaRes.ok) throw new Error('메타데이터 저장 실패')
-      addLog('메타데이터 저장 완료 ✓')
+      // 3. 메타데이터 저장 (8000)
+addLog('메타데이터 저장 중...')
+const metaRes = await fetch(`${BASE_URL}/api/documents/metadata`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    document_id: uploadData.document_id,
+    room_id: roomId,
+    filename: uploadData.filename,
+  }),
+})
+console.log('메타데이터 응답 상태:', metaRes.status)  // ← 추가
+const metaData = await metaRes.json()
+console.log('메타데이터 응답:', metaData)  // ← 추가
+if (!metaRes.ok) throw new Error('메타데이터 저장 실패')
+addLog('메타데이터 저장 완료 ✓')
 
       onFileUploaded?.(uploadData.filename)
 
