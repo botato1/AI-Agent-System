@@ -16,7 +16,7 @@ type Props = {
 
 const tabs = ['문서', '음성']
 
-export default function Documents({ selectedDocId, docViewMode, onNameClick, onAnalysisClick, onBack }: Props) {
+export default function Documents({ selectedDocId, docViewMode, onBack }: Props) {
   const [activeTab, setActiveTab] = useState(0)
 
   const selectedDoc = files.find(f => f.id === selectedDocId) ?? null
@@ -55,8 +55,6 @@ export default function Documents({ selectedDocId, docViewMode, onNameClick, onA
 
       {activeTab === 0 && (
         <DocumentTab
-          onNameClick={onNameClick}
-          onAnalysisClick={onAnalysisClick}
         />
       )}
       {activeTab === 1 && (
