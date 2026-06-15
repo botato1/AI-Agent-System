@@ -24,21 +24,24 @@ def process_audio_pipeline(wav_path: str, topic: str = "") -> list:
             best_speaker = "UNKNOWN"
             max_overlap = 0.0
             
+            # 발화 구간 겹침(Overlap) 검사로 최적의 화자 찾기
             for track in diarization_tracks:
                 overlap = min(end, track["end"]) - max(start, track["start"])
                 if overlap > max_overlap:
                     max_overlap = overlap
                     best_speaker = track["speaker"]
             
+            # 💡 개별 대사별로 user_edited 플래그 추가 (초기값 False)
             final_result.append({
-                "start": f"{start:.2f}", 
-                "end": f"{end:.2f}", 
-                "speaker": best_speaker, 
-                "text": text
+                "start": round(start, 2), 
+                "end": round(end, 2), 
+                "speaker": best_speaker,
+                "text": text,
+                "user_edited": False
             })
             
         return final_result
-
-    finally:
-        # 무조건 실행되는 클린업 (원본 파일 및 임시 JSON 삭제)
-        cleanup_files(wav_path, json_path)
+        
+    except Exception as e:
+        logger.error(f"❌ 파이프라인 실행 중 오류 발생: {str(e)}")
+        raise e

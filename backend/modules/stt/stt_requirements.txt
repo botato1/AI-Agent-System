@@ -19,3 +19,25 @@ pyannote.audio==3.1.1
 soundfile>=0.12.1
 huggingface_hub>=0.23.0
 
+
+
+
+# whisper.cpp
+cd /Users/junoh/Documents/AI-Agent-System/backend/modules/stt
+git clone https://github.com/ggerganov/whisper.cpp.git
+cd whisper.cpp
+
+# 폴더 구조에 맞게 빌드하기 (가장 중요 ⭐️)
+mkdir build
+cd build
+cmake ..
+make -j
+
+# large-v3-turbo
+cd ..
+bash ./models/download-ggml-model.sh large-v3-turbo
+
+pip install --upgrade pyannote.audio
+
+cd /Users/junoh/Documents/AI-Agent-System/backend
+uvicorn modules.stt.main:app --reload --host 0.0.0.0 --port 8001
