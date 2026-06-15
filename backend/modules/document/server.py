@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
-import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -100,24 +98,18 @@ async def process_pdf(file: UploadFile = File(...)):
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="PDF 파일만 업로드 가능합니다.")
 
-    tmp_path: str | None = None
     try:
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            content = await file.read()
-            tmp.write(content)
-            tmp_path = tmp.name
+        # 원본 PDF 저장
+        _STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+        saved_pdf = _STORAGE_DIR / file.filename
+        saved_pdf.write_bytes(await file.read())
 
         start = time.time()
         pipeline = get_pipeline()
 
-        doc_result = pipeline.run(tmp_path)
+        doc_result = pipeline.run(str(saved_pdf))
         assembled  = assemble(doc_result)
         elapsed    = round(time.time() - start, 2)
-
-        # 원본 PDF 저장
-        _STORAGE_DIR.mkdir(parents=True, exist_ok=True)
-        saved_pdf = _STORAGE_DIR / file.filename
-        shutil.copy2(tmp_path, saved_pdf)
 
         out = assembled.model_dump(mode="json") if hasattr(assembled, "model_dump") else assembled.__dict__
 
@@ -158,10 +150,6 @@ async def process_pdf(file: UploadFile = File(...)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-    finally:
-        if tmp_path and os.path.exists(tmp_path):
-            os.unlink(tmp_path)
 
 
 if __name__ == "__main__":
