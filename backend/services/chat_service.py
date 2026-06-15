@@ -133,16 +133,147 @@ def normalize_sources(sources: list | None) -> list[dict]:
     return normalized_sources
 
 
+def normalize_task_status(status: str | None) -> str:
+    """
+    LLM이 한글 상태값을 반환해도
+    ChatResponseSchema에서 허용하는 status 값으로 변환한다.
+
+    허용값:
+    todo / in_progress / done / delayed
+    """
+    if not status:
+        return "todo"
+
+    status = str(status).strip()
+
+    status_map = {
+        # todo
+        "todo": "todo",
+        "할일": "todo",
+        "할 일": "todo",
+        "대기": "todo",
+        "예정": "todo",
+        "미완료": "todo",
+        "해야함": "todo",
+        "해야 함": "todo",
+
+        # in_progress
+        "in_progress": "in_progress",
+        "doing": "in_progress",
+        "진행중": "in_progress",
+        "진행 중": "in_progress",
+        "진행": "in_progress",
+        "작업중": "in_progress",
+        "작업 중": "in_progress",
+
+        # done
+        "done": "done",
+        "완료": "done",
+        "끝남": "done",
+        "완료됨": "done",
+        "처리완료": "done",
+        "처리 완료": "done",
+
+        # delayed
+        "delayed": "delayed",
+        "지연": "delayed",
+        "연기": "delayed",
+        "늦어짐": "delayed",
+        "보류": "delayed",
+    }
+
+    return status_map.get(status, "todo")
+
+
+def normalize_task_priority(priority: str | None) -> str:
+    """
+    LLM이 한글 우선순위 값을 반환해도
+    스키마에서 허용하는 priority 값으로 변환한다.
+
+    허용값:
+    high / medium / low
+    """
+    if not priority:
+        return "medium"
+
+    priority = str(priority).strip()
+
+    priority_map = {
+        "high": "high",
+        "높음": "high",
+        "상": "high",
+        "긴급": "high",
+        "중요": "high",
+
+        "medium": "medium",
+        "보통": "medium",
+        "중간": "medium",
+        "중": "medium",
+        "일반": "medium",
+
+        "low": "low",
+        "낮음": "low",
+        "하": "low",
+        "여유": "low",
+    }
+
+    return priority_map.get(priority, "medium")
+
+
+def normalize_tasks(tasks: list | None) -> list[dict]:
+    """
+    LLM 또는 task_extract_node에서 나온 tasks를
+    ChatResponseSchema 형식에 맞게 정리한다.
+
+    특히 status가 '진행중', '완료', '대기'처럼 한글로 들어오면
+    Pydantic Literal 검증에서 500 에러가 나기 때문에
+    응답 생성 전에 영어 enum 값으로 변환한다.
+    """
+    if not tasks:
+        return []
+
+    normalized_tasks = []
+
+    for idx, task in enumerate(tasks):
+        if not isinstance(task, dict):
+            continue
+
+        normalized_tasks.append({
+            "task_id": task.get("task_id")
+                or task.get("id")
+                or f"task_{idx + 1}",
+            "task": task.get("task")
+                or task.get("title")
+                or task.get("content")
+                or "",
+            "assignee": task.get("assignee"),
+            "deadline": task.get("deadline")
+                or task.get("due_date")
+                or task.get("due"),
+            "status": normalize_task_status(task.get("status")),
+            "priority": normalize_task_priority(task.get("priority")),
+            "room_id": task.get("room_id")
+                or task.get("conversation_id"),
+            "document_id": task.get("document_id"),
+            "created_at": task.get("created_at"),
+        })
+
+    return normalized_tasks
+
+
 # AgentState를 프론트 응답 형식으로 반환하는 함수
 def build_chat_response(state: AgentState) -> ChatResponseSchema:
     raw_sources = state.get("sources", [])
     sources = normalize_sources(raw_sources)
 
+    raw_tasks = state.get("tasks", [])
+    tasks = normalize_tasks(raw_tasks)
+
     return ChatResponseSchema(
         room_id=state.get("room_id", ""),
         answer=state.get("final_answer") or "",
         summary=state.get("summary"),
-        tasks=state.get("tasks", []),
+        tasks=tasks,
         sources=sources,
         notion_result=state.get("notion_result"),
         graph_data={
