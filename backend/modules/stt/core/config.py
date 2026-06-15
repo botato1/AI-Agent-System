@@ -1,6 +1,7 @@
 import os
 import logging
 import platform
+import sys
 
 # 기본 디렉토리 설정
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -14,11 +15,8 @@ WHISPER_CLI = os.path.join(BASE_DIR, "whisper.cpp", "build", "bin", f"whisper-cl
 WHISPER_MODEL = os.path.join(BASE_DIR, "whisper.cpp", "models", "ggml-large-v3-turbo.bin")
 DIARIZE_SCRIPT = os.path.join(BASE_DIR, "diarize_engine.py")
 
-# OS별 파이썬 가상환경 경로 분기
-if platform.system() == "Windows":
-    PYTHON_EXEC = os.path.join(BASE_DIR, "venv", "Scripts", "python.exe")
-else:
-    PYTHON_EXEC = os.path.join(BASE_DIR, "venv", "bin", "python3")
+# 현재 활성화된 파이썬(가상환경) 실행 경로를 자동으로 가져옴
+PYTHON_EXEC = sys.executable
 
 # uploads 폴더 자동 생성
 os.makedirs(UPLOAD_DIR, exist_ok=True)

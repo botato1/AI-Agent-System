@@ -2,6 +2,7 @@
 from pathlib import Path
 from uuid import uuid4
 from fastapi import UploadFile
+import httpx
 
 from backend.modules.rag.document_loader import load_and_insert
 from backend.db.crud import ensure_conversation, save_document_metadata
@@ -19,16 +20,13 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 UPLOAD_DIR = BASE_DIR / "data" / "raw"
 
 
-# 업로드 가능한 문서 파일인지 확장자로 검사하는 함수
 def is_allowed_document_file(file: UploadFile) -> bool:
     filename = file.filename or ""
     suffix = Path(filename).suffix.lower()
 
-    # 1. 문서/이미지 파일은 확장자로 검사
     if suffix in ALLOWED_DOCUMENT_EXTENSIONS:
         return True
 
-    # 2. 음성 파일은 MIME 타입으로 검사
     if file.content_type and file.content_type.startswith("audio/"):
         return True
 
@@ -105,11 +103,54 @@ async def upload_and_process_document(file: UploadFile, room_id: str) -> dict:
         document_type = _get_document_type(filename, file.content_type)
         source = _get_source(filename, file.content_type)
 
-        # 7. 업로드만 해도 채팅방 목록에 나오도록 conversations 생성/갱신
+        stt_result = None
+        ocr_result = None
+        message = "파일 업로드 완료"
+
+        # 7. 이미지 OCR 처리
+        # develop 코드 유지
+        if suffix in {".png", ".jpg", ".jpeg"}:
+            try:
+                async with httpx.AsyncClient(timeout=180.0) as client:
+                    with open(save_path, "rb") as img_file:
+                        response = await client.post(
+                            "http://localhost:8003/process",
+                            files={"file": (filename, img_file, file.content_type)},
+                        )
+
+                    ocr_result = response.json()
+
+                message = "이미지 OCR 처리 완료"
+
+            except Exception as ocr_error:
+                ocr_result = None
+                message = f"이미지 업로드 완료, OCR 처리 실패: {str(ocr_error)}"
+
+        # 8. 음성 STT 처리
+        # develop 코드 유지
+        elif file.content_type and file.content_type.startswith("audio/"):
+            try:
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    with open(save_path, "rb") as audio_file:
+                        response = await client.post(
+                            "http://192.168.0.245:8001/api/v1/stt",
+                            files={"file": (filename, audio_file, file.content_type)},
+                            data={"topic": ""},
+                        )
+
+                    stt_result = response.json()
+
+                message = "음성 파일 STT 처리 완료"
+
+            except Exception as stt_error:
+                stt_result = None
+                message = f"음성 업로드 완료, STT 처리 실패: {str(stt_error)}"
+
+        # 9. 업로드만 해도 채팅방 목록에 나오도록 conversations 생성/갱신
         ensure_conversation(room_id, filename)
 
-        # 8. documents 테이블에 먼저 저장
-        # save_document_metadata가 반환한 id를 최종 document_id로 사용
+        # 10. documents 테이블에 먼저 저장
+        # 핵심: 여기서 저장된 id를 ChromaDB document_id로도 사용
         saved_document_id = save_document_metadata({
             "id": document_id,
             "conversation_id": room_id,
@@ -117,16 +158,15 @@ async def upload_and_process_document(file: UploadFile, room_id: str) -> dict:
             "type": document_type,
             "source": source,
             "file_path": str(save_path),
-            "summary": "",
+            "summary": str(stt_result or ocr_result) if (stt_result or ocr_result) else "",
             "status": "processed",
             "notion_url": "",
             "error": "",
         })
 
-        # 9. 파일 형식에 따라 처리 분기
+        # 11. PDF는 DB 저장 후 ChromaDB에 적재
+        # 중요: document_id 없이 load_and_insert(str(save_path))를 먼저 호출하면 안 됨
         if suffix == ".pdf":
-            # 핵심:
-            # ChromaDB에 넣을 때 SQLite documents 테이블에 저장된 id와 같은 값을 넘김
             inserted_document_id = load_and_insert(
                 str(save_path),
                 document_id=saved_document_id,
@@ -147,16 +187,7 @@ async def upload_and_process_document(file: UploadFile, room_id: str) -> dict:
 
             message = "문서 업로드 및 ChromaDB 적재 완료"
 
-        elif suffix in {".png", ".jpg", ".jpeg"}:
-            message = "이미지 업로드 완료, OCR 처리는 추후 연동 예정"
-
-        elif file.content_type and file.content_type.startswith("audio/"):
-            message = "음성 파일 업로드 완료, Whisper 처리는 추후 연동 예정"
-
-        else:
-            message = "파일 업로드 완료"
-
-        # 10. 성공 결과 반환
+        # 12. 성공 결과 반환
         return {
             "status": "success",
             "room_id": room_id,

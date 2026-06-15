@@ -1,6 +1,6 @@
 import json
 import subprocess
-from core.config import PYTHON_EXEC, DIARIZE_SCRIPT, logger
+from modules.stt.core.config import PYTHON_EXEC, DIARIZE_SCRIPT, logger
 
 def run_diarization(wav_path: str) -> list:
     """독립 프로세스로 화자 분리 엔진을 실행하고 JSON 배열을 반환합니다."""

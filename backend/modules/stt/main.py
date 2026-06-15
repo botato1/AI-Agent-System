@@ -1,8 +1,8 @@
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from core.config import logger
-from routers import stt
+from .core.config import logger
+from .routers import stt
 
 # FastAPI 앱 초기화
 app = FastAPI(
@@ -21,7 +21,7 @@ app.add_middleware(
 )
 
 # 라우터 등록 (엔드포인트를 /api/v1/stt 형태로 연결)
-app.include_router(stt.router, prefix="/api/v1", tags=["Audio Processing"])
+app.include_router(stt.router, prefix="/api", tags=["Audio Processing"])
 
 @app.get("/")
 async def root():
