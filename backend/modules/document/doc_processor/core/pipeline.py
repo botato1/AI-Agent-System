@@ -9,7 +9,6 @@ import fitz
 import pdfplumber
 
 from doc_processor.classifiers import figure_classifier
-from doc_processor.confidence.engine import ConfidenceEngine
 from doc_processor.core.models import (
     DocumentResult,
     ImageBlock,
@@ -18,7 +17,6 @@ from doc_processor.core.models import (
     PageResult,
 )
 from doc_processor.core.pdf_classifier import classify_pdf
-from doc_processor.fallback.gemini_fallback import GeminiFallback
 from doc_processor.postprocess.processor import PostProcessor
 from doc_processor.ocr.paddle_engine import PaddleEngine
 from doc_processor.ocr.surya_engine import SuryaEngine
@@ -46,7 +44,6 @@ class DocumentPipeline:
         self,
         dpi: int = 220,
         min_image_px: int = 30,
-        gemini_api_key: str = "",
         paddle_only_threshold: float = 0.80,
         use_docling: bool = True,
         debug_ocr: bool = False,
@@ -61,8 +58,6 @@ class DocumentPipeline:
         self._surya: SuryaEngine | None = None
         self._tsr = None                    # TableStructureRecognition (table_image 최초 사용 시 로드)
         self._worst_ocr: list[dict] = []    # quality_score 하위 20건 (debug_ocr=True 시 사용)
-        self._confidence = ConfidenceEngine()
-        self._fallback = GeminiFallback(api_key=gemini_api_key)
         self._postprocessor = PostProcessor()
         # Docling 레이아웃 파서 (선택적)
         self._docling = DoclingLayoutParser() if use_docling else None
@@ -173,23 +168,11 @@ class DocumentPipeline:
 
                 page_layout = layout_map.get(page_no, [])
                 content = self._process_page(fitz_page, plumber_page, page_layout, page_no)
-                confidence = self._confidence.compute(content)
-                fallback_used = False
-
-                if self._fallback.should_run(confidence):
-                    print(f"  → Gemini Fallback 실행 (낮은 confidence: {confidence.to_dict()})")
-                    page_image = render_page(fitz_page, dpi=self.dpi)
-                    content = self._fallback.verify(page_image, content, confidence)
-                    confidence = self._confidence.compute(content)
-                    fallback_used = True
-
                 content = self._postprocessor.process(content)
 
                 doc.pages.append(PageResult(
                     page=page_no,
                     content=content,
-                    confidence=confidence,
-                    fallback_used=fallback_used,
                 ))
 
         # 전체 처리 시간 기록

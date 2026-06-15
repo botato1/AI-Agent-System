@@ -15,7 +15,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pdf", default="test.pdf", help="입력 PDF 경로")
     parser.add_argument("--out", default="result.json", help="출력 JSON 경로")
     parser.add_argument("--dpi", type=int, default=220, help="렌더링 DPI")
-    parser.add_argument("--gemini-key", default="", help="Gemini API 키 (없으면 Fallback 비활성화)")
     return parser.parse_args()
 
 
@@ -26,7 +25,7 @@ def main() -> None:
     start = time.time()
 
     # 1. 파이프라인 실행 → DocumentResult (내부 처리 결과)
-    pipeline = DocumentPipeline(dpi=args.dpi, gemini_api_key=args.gemini_key)
+    pipeline = DocumentPipeline(dpi=args.dpi)
     doc = pipeline.run(args.pdf)
 
     # 2. DocumentResult → DocumentSchema (팀 공통 스키마로 변환)
