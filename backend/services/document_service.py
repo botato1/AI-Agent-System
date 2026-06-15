@@ -1,10 +1,14 @@
 # 문서 업로드 및 처리 서비스
+import os
 from pathlib import Path
 from fastapi import UploadFile
 import httpx
 
 from backend.modules.rag.document_loader import load_and_insert
 from backend.db.crud import ensure_conversation, save_document_metadata
+
+STT_URL = os.getenv("STT_URL", "http://192.168.0.245:8001/api/stt")
+OCR_URL = os.getenv("OCR_URL", "http://localhost:8003/process")
 
 
 # TODO: 문서/음성 처리 담당자와 최종 지원 확장자 확정 필요
@@ -108,7 +112,7 @@ async def upload_and_process_document(file: UploadFile, room_id: str) -> dict:
                 async with httpx.AsyncClient(timeout=180.0) as client:
                     with open(save_path, "rb") as img_file:
                         response = await client.post(
-                            "http://localhost:8003/process",
+                            OCR_URL,
                             files={"file": (filename, img_file, file.content_type)},
                         )
                     ocr_result = response.json()
@@ -122,7 +126,7 @@ async def upload_and_process_document(file: UploadFile, room_id: str) -> dict:
                 async with httpx.AsyncClient(timeout=120.0) as client:
                     with open(save_path, "rb") as audio_file:
                         response = await client.post(
-                            "http://192.168.0.245:8001/api/v1/stt",
+                            STT_URL,
                             files={"file": (filename, audio_file, file.content_type)},
                             data={"topic": ""},
                         )
