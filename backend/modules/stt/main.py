@@ -1,7 +1,10 @@
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .core.config import logger
+from fastapi.staticfiles import StaticFiles  # 💡 추가
+import os
+
+from .core.config import logger, UPLOAD_DIR
 from .routers import stt
 
 # FastAPI 앱 초기화
@@ -19,6 +22,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 💡 핵심: 외부에서 uploads 폴더 내부 파일에 직접 접근할 수 있도록 마운트
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 # 라우터 등록 (엔드포인트를 /api/v1/stt 형태로 연결)
 app.include_router(stt.router, prefix="/api", tags=["Audio Processing"])

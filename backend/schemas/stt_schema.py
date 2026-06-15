@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel
 # CommonDocumentSchema는 팀 공통 14개 필수 키를 담고 있는 부모 클래스입니다.
 from backend.schemas.common_schema import CommonDocumentSchema
@@ -22,6 +22,7 @@ class STTMetadata(BaseModel):
     initial_prompt_applied: bool     # initial prompt 적용 여부
     total_time_sec: float            # STT 처리에 걸린 시간
     compute_type: str                # 연산 타입, 예: int8
+    original_file_url: Optional[str] = None
 
 
 # 3. 최종 STT 결과 구조 (팀 공통 스키마를 상속받아 14개 공통 키를 자동으로 포함합니다)
