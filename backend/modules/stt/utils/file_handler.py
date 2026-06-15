@@ -3,7 +3,7 @@ import shutil
 import subprocess
 import uuid
 from fastapi import UploadFile
-from core.config import UPLOAD_DIR, logger
+from modules.stt.core.config import UPLOAD_DIR, logger
 
 def save_upload_file(upload_file: UploadFile) -> str:
     """업로드된 파일을 임시 저장하고, Whisper용 16kHz WAV로 강제 변환합니다."""
