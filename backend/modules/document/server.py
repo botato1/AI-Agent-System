@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -75,6 +76,19 @@ async def process_pdf(file: UploadFile = File(...)):
         # 처리 시간 추가
         if isinstance(out.get("metadata"), dict):
             out["metadata"]["api_processing_time_sec"] = elapsed
+
+        # 팀 공통 스키마 필드 추가
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        out.setdefault("type", "document")
+        out.setdefault("summary", out.get("content", "")[:200] if out.get("content") else "")
+        out.setdefault("language", "ko")
+        out.setdefault("created_at", now)
+        out.setdefault("importance_score", 0)
+        out.setdefault("related_documents", [])
+        out.setdefault("notion_url", None)
+        out.setdefault("chroma_id", None)
+        out.setdefault("error", None)
+        out.setdefault("user_edited", False)
 
         return JSONResponse(content=out)
 
