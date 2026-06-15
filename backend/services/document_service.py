@@ -19,7 +19,6 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 UPLOAD_DIR = BASE_DIR / "data" / "raw"
 
 
-# 업로드 가능한 문서 파일인지 확장자로 검사하는 함수
 def is_allowed_document_file(file: UploadFile) -> bool:
     filename = file.filename or ""
     suffix = Path(filename).suffix.lower()
@@ -98,13 +97,25 @@ async def upload_and_process_document(file: UploadFile, room_id: str) -> dict:
         document_type = _get_document_type(filename, file.content_type)
         source = _get_source(filename, file.content_type)
         stt_result = None
+        ocr_result = None
 
         if suffix == ".pdf":
             load_and_insert(str(save_path))
             message = "문서 업로드 및 ChromaDB 적재 완료"
 
         elif suffix in {".png", ".jpg", ".jpeg"}:
-            message = "이미지 업로드 완료, OCR 처리는 추후 연동 예정"
+            try:
+                async with httpx.AsyncClient(timeout=180.0) as client:
+                    with open(save_path, "rb") as img_file:
+                        response = await client.post(
+                            "http://localhost:8003/process",
+                            files={"file": (filename, img_file, file.content_type)},
+                        )
+                    ocr_result = response.json()
+                message = "이미지 OCR 처리 완료"
+            except Exception as ocr_error:
+                ocr_result = None
+                message = f"이미지 업로드 완료, OCR 처리 실패: {str(ocr_error)}"
 
         elif file.content_type and file.content_type.startswith("audio/"):
             try:
@@ -115,7 +126,7 @@ async def upload_and_process_document(file: UploadFile, room_id: str) -> dict:
                             files={"file": (filename, audio_file, file.content_type)},
                             data={"topic": ""},
                         )
-                stt_result = response.json()
+                    stt_result = response.json()
                 message = "음성 파일 STT 처리 완료"
             except Exception as stt_error:
                 stt_result = None
@@ -134,7 +145,7 @@ async def upload_and_process_document(file: UploadFile, room_id: str) -> dict:
             "type": document_type,
             "source": source,
             "file_path": str(save_path),
-            "summary": str(stt_result) if stt_result else "",
+            "summary": str(stt_result or ocr_result) if (stt_result or ocr_result) else "",
             "status": "processed",
             "notion_url": "",
             "error": "",
