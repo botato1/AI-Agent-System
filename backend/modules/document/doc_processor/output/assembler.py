@@ -178,7 +178,7 @@ def _build_chunks(doc: DocumentResult, doc_id: str) -> list[ChunkSchema]:
         for i, (merged_text, rep_block) in enumerate(merged_text_blocks):
             chunks.append(ChunkSchema(
                 id=_chunk_id(doc_id, pg, "text", i),
-                type="text",
+                content_type="text",
                 page_number=pg,
                 content=merged_text,
                 metadata=ChunkMetadata(
@@ -197,7 +197,7 @@ def _build_chunks(doc: DocumentResult, doc_id: str) -> list[ChunkSchema]:
                 continue
             chunks.append(ChunkSchema(
                 id=_chunk_id(doc_id, pg, "table", i),
-                type="table",
+                content_type="table",
                 page_number=pg,
                 content=table.markdown,
                 metadata=ChunkMetadata(
@@ -215,7 +215,7 @@ def _build_chunks(doc: DocumentResult, doc_id: str) -> list[ChunkSchema]:
                 continue
             chunks.append(ChunkSchema(
                 id=_chunk_id(doc_id, pg, "image", i),
-                type="image",
+                content_type="image",
                 page_number=pg,
                 content=img.ocr_text,
                 metadata=ChunkMetadata(
@@ -234,7 +234,7 @@ def _build_chunks(doc: DocumentResult, doc_id: str) -> list[ChunkSchema]:
                 continue
             chunks.append(ChunkSchema(
                 id=_chunk_id(doc_id, pg, "chart", i),
-                type="chart",
+                content_type="chart",
                 page_number=pg,
                 content=chart.description,
                 metadata=ChunkMetadata(
