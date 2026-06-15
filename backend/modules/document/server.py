@@ -90,6 +90,10 @@ async def process_pdf(file: UploadFile = File(...)):
         out.setdefault("error", None)
         out.setdefault("user_edited", False)
 
+        # 프론트 채팅 연동용
+        out["document_id"] = out.get("id")
+        out["filename"] = file.filename
+        
         return JSONResponse(content=out)
 
     except Exception as e:
