@@ -58,26 +58,40 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
       addLog(`채팅방 생성 완료 (${roomId})`)
       onRoomIdCreated?.(roomId)
 
-      // 2. 문서 업로드
+      // 2. 문서 처리 (8003)
       addLog('문서 업로드 중...')
       const formData = new FormData()
       formData.append('file', selectedFile)
-      formData.append('room_id', roomId)
 
-      const uploadRes = await fetch(`${BASE_URL}/api/documents/upload`, {
+      const uploadRes = await fetch('http://220.90.180.93:8003/api/document', {
         method: 'POST',
         body: formData,
       })
       if (!uploadRes.ok) throw new Error('문서 업로드 실패')
       const uploadData = await uploadRes.json()
       console.log('업로드 응답:', uploadData)
-      onFileUploaded?.(uploadData.filename)
-      addLog(`업로드 완료: ${uploadData.filename}`)
+      addLog(`문서 처리 완료: ${uploadData.filename}`)
 
-      // 파일명 전달 + 사이드바 갱신
+      // 3. 메타데이터 저장 (8000)
+      addLog('메타데이터 저장 중...')
+      const metaRes = await fetch(`${BASE_URL}/api/documents/metadata`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          document_id: uploadData.document_id,
+          room_id: roomId,
+          filename: uploadData.filename,
+        }),
+      })
+      if (!metaRes.ok) throw new Error('메타데이터 저장 실패')
+      addLog('메타데이터 저장 완료 ✓')
+
+      onFileUploaded?.(uploadData.filename)
+
+      // 사이드바 갱신
       setTimeout(() => onRoomCreated?.(), 1000)
 
-      // 3. 파이프라인 시작
+      // 4. 파이프라인 시작
       setCurrentStep(0)
 
     } catch (err: any) {
@@ -186,7 +200,6 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
             </div>
           )}
 
-          {/* 업로드 영역 */}
           {!file ? (
             <div
               onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
@@ -226,7 +239,6 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
             </div>
           )}
 
-          {/* 초기 분석 프롬프트 */}
           <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-600 p-4">
             <h3 className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">초기 분석 프롬프트</h3>
             <p className="text-xs text-gray-400 dark:text-gray-500 mb-3">
@@ -239,10 +251,7 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
               className="w-full resize-none text-sm bg-gray-100 dark:bg-[#161616] border border-gray-200 dark:border-gray-700 rounded-lg p-3 text-gray-700 dark:text-gray-300 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-400 min-h-[100px]"
             />
             <div className="flex justify-end gap-2 mt-3">
-              <button
-                onClick={() => setPrompt('')}
-                className="px-4 py-1.5 text-xs text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-              >
+              <button onClick={() => setPrompt('')} className="px-4 py-1.5 text-xs text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                 초기화
               </button>
               <button className="px-4 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
@@ -251,7 +260,6 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
             </div>
           </div>
 
-          {/* 처리 단계 */}
           <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
             <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-4 uppercase tracking-wider">처리 단계</h3>
             <div className="flex flex-col">
@@ -280,29 +288,25 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
 
         <div className="flex flex-col gap-4">
           <div className="bg-gray-900 rounded-xl p-4">
-  <div className="flex items-center gap-2 mb-3">
-    <div className="w-3 h-3 rounded-full bg-red-400" />
-    <div className="w-3 h-3 rounded-full bg-yellow-400" />
-    <div className="w-3 h-3 rounded-full bg-green-400" />
-    <span className="text-xs text-gray-500 ml-2">Agent 실행 로그</span>
-  </div>
-
-  <div className="flex flex-col gap-1.5 overflow-y-auto transition-all duration-300"
-    style={{ minHeight: '500px', 
-             maxHeight: '320px',
-             height: logs.length === 0 ? '40px' : `${Math.min(logs.length * 24 + 16, 320)}px` }}>
-
-      {logs.length === 0 ? (
-        <p className="text-xs text-gray-600">파일을 업로드하면 로그가 표시됩니다...</p>
-      ) : (
-        logs.map((log, i) => (
-          <p key={i} className={`text-xs font-mono ${log.includes('완료') ? 'text-green-400' : log.includes('오류') ? 'text-red-400' : 'text-gray-300'}`}>
-            {log}
-          </p>
-        ))
-      )}
-    </div>
-  </div>
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-3 h-3 rounded-full bg-red-400" />
+              <div className="w-3 h-3 rounded-full bg-yellow-400" />
+              <div className="w-3 h-3 rounded-full bg-green-400" />
+              <span className="text-xs text-gray-500 ml-2">Agent 실행 로그</span>
+            </div>
+            <div className="flex flex-col gap-1.5 overflow-y-auto transition-all duration-300"
+              style={{ minHeight: '500px', maxHeight: '320px', height: logs.length === 0 ? '40px' : `${Math.min(logs.length * 24 + 16, 320)}px` }}>
+              {logs.length === 0 ? (
+                <p className="text-xs text-gray-600">파일을 업로드하면 로그가 표시됩니다...</p>
+              ) : (
+                logs.map((log, i) => (
+                  <p key={i} className={`text-xs font-mono ${log.includes('완료') ? 'text-green-400' : log.includes('오류') ? 'text-red-400' : 'text-gray-300'}`}>
+                    {log}
+                  </p>
+                ))
+              )}
+            </div>
+          </div>
 
           {doneCount === 6 && (
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-blue-100 dark:border-blue-800 p-4">
