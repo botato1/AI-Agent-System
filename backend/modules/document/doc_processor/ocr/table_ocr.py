@@ -198,7 +198,7 @@ def _merge_to_html(tokens: list[str], cell_texts: list[str]) -> str:
       A) '<td', (attr...), '>', '</td>'  — 멀티 토큰
       B) '<td></td>'                     — 단일 합성 토큰
 
-    헤더 행(row_idx ≤ header_rows + 1)의 셀 텍스트는 _normalize_km_label() 적용.
+    헤더 행(row_idx ≤ header_rows)의 셀 텍스트는 _normalize_km_label() 적용.
     """
     header_rows = _parse_header_rows(tokens)
     _SELF_TD = {"<td></td>", "<th></th>"}
@@ -219,7 +219,7 @@ def _merge_to_html(tokens: list[str], cell_texts: list[str]) -> str:
             tag   = tok[:3]          # "<td" or "<th"
             close = "</td>" if tag == "<td" else "</th>"
             raw   = cell_texts[cell_idx] if cell_idx < len(cell_texts) else ""
-            text  = _normalize_km_label(raw) if row_idx <= header_rows + 1 else raw
+            text  = _normalize_km_label(raw) if row_idx <= header_rows else raw
             out.append(f"{tag}>{text}{close}")
             cell_idx += 1
 
@@ -232,7 +232,7 @@ def _merge_to_html(tokens: list[str], cell_texts: list[str]) -> str:
             if i < len(tokens):
                 out.append(">")
             raw  = cell_texts[cell_idx] if cell_idx < len(cell_texts) else ""
-            text = _normalize_km_label(raw) if row_idx <= header_rows + 1 else raw
+            text = _normalize_km_label(raw) if row_idx <= header_rows else raw
             out.append(text)
             cell_idx += 1
 
@@ -322,6 +322,13 @@ def run_table_ocr(
     # ── 1. TSR 실행 ───────────────────────────────────────────────────────────
     arr = np.array(image)
     tsr_results = list(tsr.predict(arr))
+    if not tsr_results:
+        return {
+            "text": "", "confidence": 0.0, "quality_score": 0.0,
+            "sources": ["tsr"], "paddle_lines": [], "surya_lines": [],
+            "structure_score": 0.0, "cell_count": 0,
+            "voting_path": "tsr_paddle", "html": "",
+        }
     res = tsr_results[0]
 
     tokens         = res.get("structure", [])

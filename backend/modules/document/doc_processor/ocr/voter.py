@@ -82,7 +82,7 @@ def _is_junk_line(text: str) -> bool:
         return True
     # 알파벳 1글자 + 기호 조합 (p., m), B. 등)
     alpha_count = sum(1 for c in stripped if c.isalpha())
-    if len(stripped) <= 3 and alpha_count <= 1 and "가" > stripped[0]:
+    if len(stripped) <= 3 and alpha_count <= 1 and stripped[0].isascii():
         return True
     # 짧은 소문자 영단어 조각 (u ur, ab cd 등)
     if len(stripped) <= 5:
