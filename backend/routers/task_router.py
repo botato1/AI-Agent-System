@@ -1,6 +1,19 @@
 from fastapi import APIRouter
 
-from backend.db.crud import get_all_tasks, create_task, update_task_status, update_task_priority, delete_task
+from backend.db.crud import (
+    get_all_tasks,
+    create_task,
+    update_task_status,
+    update_task_priority,
+    delete_task,
+)
+
+from backend.schemas.task_schema import (
+    TaskCreateRequest,
+    TaskStatusUpdateRequest,
+    TaskPriorityUpdateRequest,
+)
+
 
 router = APIRouter(
     prefix="/api",
@@ -8,6 +21,7 @@ router = APIRouter(
 )
 
 
+# 전체 업무 목록 조회 API
 @router.get("/tasks")
 def get_task_list():
     try:
@@ -40,11 +54,14 @@ def get_task_list():
             "tasks": [],
             "error": "업무 목록 조회 중 오류가 발생했습니다."
         }
-    
+
+
+# 업무 직접 생성 API
 @router.post("/tasks")
-def create_task_api(task_data: dict):
+def create_task_api(request: TaskCreateRequest):
     try:
-        task_name = (task_data.get("task") or "").strip()
+        task_data = request.model_dump()
+        task_name = task_data["task"].strip()
 
         if not task_name:
             return {
@@ -52,26 +69,9 @@ def create_task_api(task_data: dict):
                 "error": "업무 내용은 필수입니다."
             }
 
-        status = task_data.get("status", "todo")
-        priority = task_data.get("priority", "medium")
-
-        if status not in {"todo", "in_progress", "done", "delayed"}:
-            return {
-                "task": None,
-                "error": "status는 todo, in_progress, done, delayed 중 하나여야 합니다."
-            }
-
-        if priority not in {"high", "medium", "low"}:
-            return {
-                "task": None,
-                "error": "priority는 high, medium, low 중 하나여야 합니다."
-            }
-
         created_task = create_task({
             **task_data,
             "task": task_name,
-            "status": status,
-            "priority": priority,
         })
 
         return {
@@ -87,20 +87,12 @@ def create_task_api(task_data: dict):
             "error": "업무 생성 중 오류가 발생했습니다."
         }
 
+
+# 업무 상태 변경 API
 @router.patch("/tasks/{task_id}/status")
-def update_task_status_api(task_id: str, request: dict):
+def update_task_status_api(task_id: str, request: TaskStatusUpdateRequest):
     try:
-        status = request.get("status")
-
-        valid_statuses = {"todo", "in_progress", "done", "delayed"}
-
-        if status not in valid_statuses:
-            return {
-                "task": None,
-                "error": "status는 todo, in_progress, done, delayed 중 하나여야 합니다."
-            }
-
-        updated = update_task_status(task_id, status)
+        updated = update_task_status(task_id, request.status)
 
         if not updated:
             return {
@@ -111,7 +103,7 @@ def update_task_status_api(task_id: str, request: dict):
         return {
             "task": {
                 "task_id": task_id,
-                "status": status
+                "status": request.status
             },
             "error": None
         }
@@ -124,20 +116,12 @@ def update_task_status_api(task_id: str, request: dict):
             "error": "업무 상태 변경 중 오류가 발생했습니다."
         }
 
+
+# 업무 우선순위 변경 API
 @router.patch("/tasks/{task_id}/priority")
-def update_task_priority_api(task_id: str, request: dict):
+def update_task_priority_api(task_id: str, request: TaskPriorityUpdateRequest):
     try:
-        priority = request.get("priority")
-
-        valid_priorities = {"high", "medium", "low"}
-
-        if priority not in valid_priorities:
-            return {
-                "task": None,
-                "error": "priority는 high, medium, low 중 하나여야 합니다."
-            }
-
-        updated = update_task_priority(task_id, priority)
+        updated = update_task_priority(task_id, request.priority)
 
         if not updated:
             return {
@@ -148,7 +132,7 @@ def update_task_priority_api(task_id: str, request: dict):
         return {
             "task": {
                 "task_id": task_id,
-                "priority": priority
+                "priority": request.priority
             },
             "error": None
         }
@@ -160,7 +144,9 @@ def update_task_priority_api(task_id: str, request: dict):
             "task": None,
             "error": "업무 우선순위 변경 중 오류가 발생했습니다."
         }
-    
+
+
+# 업무 삭제 API
 @router.delete("/tasks/{task_id}")
 def delete_task_api(task_id: str):
     try:
