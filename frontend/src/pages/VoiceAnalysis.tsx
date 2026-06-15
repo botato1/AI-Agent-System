@@ -8,22 +8,40 @@ import TabSpeakers from '../components/VoiceAnalysis/TabSpeakers'
 const TABS = ['요약', '전체 스크립트', '키워드', '액션 아이템'] as const
 type Tab = typeof TABS[number]
 
+interface SttSegment {
+  speaker: string
+  start: number
+  end: number
+  text: string
+  user_edited: boolean
+}
+
+interface SttResult {
+  file_id: string
+  duration: number
+  segments: SttSegment[]
+  fileName: string
+}
+
 interface Props {
   fileId: string
+  sttResult: SttResult | null
   onBack: () => void
 }
 
-export default function VoiceAnalysis({ fileId, onBack }: Props) {
+const formatDuration = (seconds: number) => {
+  const m = Math.floor(seconds / 60).toString().padStart(2, '0')
+  const s = Math.floor(seconds % 60).toString().padStart(2, '0')
+  return `${m}:${s}`
+}
+
+export default function VoiceAnalysis({ fileId, sttResult, onBack }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('요약')
 
-  const fileNames: Record<string, string> = {
-    '1': '마케팅 전략 회의_2024-05-15.mp3',
-    '2': '개발 주간 회의_2024-05-14.wav',
-    '3': '고객 콜_김나연_2024-05-13.m4a',
-  }
-  const fileName = fileNames[fileId] ?? '음성 파일'
+  const fileName = sttResult?.fileName ?? fileId
+  const duration = sttResult ? formatDuration(sttResult.duration) : '--:--'
 
-  return (
+return (
     <div className="flex-1 p-8 overflow-y-auto bg-white dark:bg-[#161616]">
       {/* 브레드크럼 */}
       <div className="flex items-center gap-2 text-xs text-gray-400 mb-4">
@@ -35,15 +53,10 @@ export default function VoiceAnalysis({ fileId, onBack }: Props) {
       {/* 파일 헤더 */}
       <div className="flex items-center justify-between mb-5">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-lg font-medium text-gray-900 dark:text-white">{fileName}</h1>
-            <button className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-              </svg>
-            </button>
-          </div>
-          <p className="text-xs text-gray-400 mt-1">48:32 · 76.4MB · 2024.05.15 14:30 업로드</p>
+          <h1 className="text-lg font-medium text-gray-900 dark:text-white">{fileName}</h1>
+          <p className="text-xs text-gray-400 mt-1">
+            {duration} · {sttResult?.segments.length ?? 0}개 발화 구간
+          </p>
         </div>
         <div className="flex gap-2">
           <button className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
@@ -68,11 +81,11 @@ export default function VoiceAnalysis({ fileId, onBack }: Props) {
             <path d="M8 5v14l11-7z" />
           </svg>
         </button>
-        <span className="text-xs text-gray-500 dark:text-gray-400 w-20 flex-shrink-0">00:00 / 48:32</span>
+        <span className="text-xs text-gray-500 dark:text-gray-400 w-24 flex-shrink-0">00:00 / {duration}</span>
         <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-1">
-          <div className="bg-blue-500 h-1 rounded-full w-[30%]" />
+          <div className="bg-blue-500 h-1 rounded-full w-0" />
         </div>
-        <span className="text-xs text-gray-400 flex-shrink-0">1.25x</span>
+        <span className="text-xs text-gray-400 flex-shrink-0">1.0x</span>
       </div>
 
       {/* 탭 바 */}
@@ -96,14 +109,14 @@ export default function VoiceAnalysis({ fileId, onBack }: Props) {
       {activeTab === '요약' && (
         <div className="flex gap-6">
           <div className="flex-1 min-w-0">
-            <TabSummary />
+            <TabSummary duration={duration} segmentCount={sttResult?.segments.length ?? 0} />
           </div>
           <div className="w-52 flex-shrink-0">
-            <TabSpeakers />
+            <TabSpeakers segments={sttResult?.segments ?? []} />
           </div>
         </div>
       )}
-      {activeTab === '전체 스크립트' && <TabScript />}
+      {activeTab === '전체 스크립트' && <TabScript segments={sttResult?.segments ?? []} />}
       {activeTab === '키워드' && <TabKeyword />}
       {activeTab === '액션 아이템' && <TabTasks />}
     </div>
