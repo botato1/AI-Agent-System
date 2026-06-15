@@ -95,6 +95,7 @@ def init_db():
         assignee TEXT,
         deadline TEXT,
         status TEXT DEFAULT 'todo',
+        priority TEXT DEFAULT 'medium',
         created_at TEXT NOT NULL
     )
     """)
