@@ -48,7 +48,11 @@ def health():
 
 @app.post("/process")
 async def process_pdf(file: UploadFile = File(...)):
+    """
+    PDF 파일을 업로드하면 문서처리 결과를 JSON으로 반환합니다.
 
+    - **file**: PDF 파일
+    """
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="PDF 파일만 업로드 가능합니다.")
 
