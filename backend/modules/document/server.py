@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -56,13 +57,13 @@ async def process_pdf(file: UploadFile = File(...)):
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="PDF 파일만 업로드 가능합니다.")
 
-    # 임시 파일로 저장
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-        content = await file.read()
-        tmp.write(content)
-        tmp_path = tmp.name
-
+    tmp_path: str | None = None
     try:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+
         start = time.time()
         pipeline = get_pipeline()
 
@@ -70,11 +71,24 @@ async def process_pdf(file: UploadFile = File(...)):
         assembled  = assemble(doc_result)
         elapsed    = round(time.time() - start, 2)
 
-        out = assembled.model_dump() if hasattr(assembled, "model_dump") else assembled.__dict__
+        out = assembled.model_dump(mode="json") if hasattr(assembled, "model_dump") else assembled.__dict__
 
         # 처리 시간 추가
         if isinstance(out.get("metadata"), dict):
             out["metadata"]["api_processing_time_sec"] = elapsed
+
+        # 팀 공통 스키마 필드 추가
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        out.setdefault("type", "document")
+        out.setdefault("summary", out.get("content", "")[:200] if out.get("content") else "")
+        out.setdefault("language", "ko")
+        out.setdefault("created_at", now)
+        out.setdefault("importance_score", 0)
+        out.setdefault("related_documents", [])
+        out.setdefault("notion_url", None)
+        out.setdefault("chroma_id", None)
+        out.setdefault("error", None)
+        out.setdefault("user_edited", False)
 
         return JSONResponse(content=out)
 
@@ -82,7 +96,8 @@ async def process_pdf(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
     finally:
-        os.unlink(tmp_path)
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 if __name__ == "__main__":

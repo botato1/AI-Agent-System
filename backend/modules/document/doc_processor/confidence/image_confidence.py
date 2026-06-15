@@ -47,7 +47,7 @@ def _special_ratio(text: str) -> float:
         return 0.0
     special = sum(
         1 for c in text
-        if not c.isalnum() and not c.isspace() and "가" > c or c > "힣"
+        if not c.isalnum() and not c.isspace() and not ("가" <= c <= "힣")
     )
     return special / len(text)
 
