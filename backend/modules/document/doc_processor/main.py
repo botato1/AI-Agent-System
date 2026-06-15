@@ -33,11 +33,6 @@ def main() -> None:
 
     # 3. 출력
     out = Path(args.out)
-    json_path = save_json(schema, str(out))
-    print(f"[Done] JSON 저장: {json_path}")
-
-    txt_path = save_txt(doc, str(out.with_suffix(".txt")))
-    print(f"[Done] TXT 저장: {txt_path}")
 
     rag_path = save_rag(schema, str(out.with_stem(out.stem + "_rag")))
     print(f"[Done] RAG JSON 저장: {rag_path}")
