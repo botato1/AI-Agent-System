@@ -16,6 +16,13 @@ interface ToastContextType {
   showToast: (message: string, type?: ToastType) => void
 }
 
+interface SttResult {
+  file_id: string
+  duration: number
+  segments: { speaker: string; start: number; end: number; text: string; user_edited: boolean }[]
+  fileName: string
+}
+
 export const ToastContext = createContext<ToastContextType>({ showToast: () => {} })
 export const useToast = () => useContext(ToastContext)
 
@@ -37,6 +44,7 @@ export default function App() {
   
   const [voicePage, setVoicePage] = useState<'list' | 'result'>('list')
   const [selectedVoiceId, setSelectedVoiceId] = useState<string | null>(null)
+  const [sttResult, setSttResult] = useState<SttResult | null>(null)
 
   const [docViewMode, setDocViewMode] = useState<'list' | 'original' | 'analysis'>('list')
   const [selectedDocId, setSelectedDocId] = useState<number | null>(null)
@@ -57,7 +65,7 @@ export default function App() {
   }
 
   const renderPage = () => {
-    switch (activePage) {
+  switch (activePage) {
     case 'home': return (
       <Home
         selectedChatId={selectedChatId}
@@ -66,39 +74,39 @@ export default function App() {
         activeRoomId={activeRoomId}
         setActiveRoomId={setActiveRoomId}
         targetFilename={targetFilename}
-        onGoToAnalysis={() => setActivePage('documentanalysis')}  
+        onGoToAnalysis={() => setActivePage('documentanalysis')}
       />
     )
-      case 'pipeline': return (
-        <Pipeline
+    case 'pipeline': return (
+      <Pipeline
         onGoToAnalysis={() => setActivePage('documentanalysis')}
         reviewFileName={reviewFileName}
         onClearReview={() => setReviewFileName(null)}
         onRoomCreated={() => setSidebarRefreshKey(prev => prev + 1)}
         onFileUploaded={(filename) => {
-          console.log('파일명 세팅:',filename)
+          console.log('파일명 세팅:', filename)
           setTargetFilename(filename)
         }}
         onRoomIdCreated={(roomId) => setTargetRoomId(roomId)}
       />
-      )
-      case 'documents': return (
-  <Documents
-    selectedDocId={selectedDocId}
-    docViewMode={docViewMode}
-    onNameClick={(id) => {
-      setSelectedDocId(id)
-      setDocViewMode('original')
-    }}
-    onAnalysisClick={(id) => {
-      setSelectedDocId(id)
-      setDocViewMode('analysis')
-    }}
-    onBack={() => setDocViewMode('list')}
-  />
-)
-      case 'documentanalysis': return (
-        <DocumentAnalysis
+    )
+    case 'documents': return (
+      <Documents
+        selectedDocId={selectedDocId}
+        docViewMode={docViewMode}
+        onNameClick={(id) => {
+          setSelectedDocId(id)
+          setDocViewMode('original')
+        }}
+        onAnalysisClick={(id) => {
+          setSelectedDocId(id)
+          setDocViewMode('analysis')
+        }}
+        onBack={() => setDocViewMode('list')}
+      />
+    )
+    case 'documentanalysis': return (
+      <DocumentAnalysis
         onReview={() => {
           setReviewFileName('마케팅 전략 회의.pdf')
           setActivePage('home')
@@ -106,27 +114,30 @@ export default function App() {
         }}
         onGoToChat={() => {
           setActiveRoomId(targetRoomId)
+          setTargetFilename(targetFilename)
           setActivePage('home')
         }}
-        onBack={()=>setActivePage('pipeline')}
+        onBack={() => setActivePage('pipeline')}
       />
     )
-      case 'tasks': return <Tasks />
-      case 'settings': return <Settings />
-      case 'graph': return <Graph onGoToAnalysis={() => setActivePage('documentanalysis')} />
-      case 'voice' : return voicePage === 'result'
-        ?<VoiceAnalysis
-            fileId={selectedVoiceId!}
-            onBack={() => setVoicePage('list')}
-          />
-        : <Voice
-            onAnalyze={(id) => {
-              setSelectedVoiceId(id)
-              setVoicePage('result')
-            }}
-          />
-    }
+    case 'tasks': return <Tasks />
+    case 'settings': return <Settings />
+    case 'graph': return <Graph onGoToAnalysis={() => setActivePage('documentanalysis')} />
+    case 'voice': return voicePage === 'result'
+      ? <VoiceAnalysis
+          fileId={selectedVoiceId!}
+          sttResult={sttResult}
+          onBack={() => setVoicePage('list')}
+        />
+      : <Voice
+          onAnalyze={(id, result) => {
+            setSelectedVoiceId(id)
+            setSttResult(result)
+            setVoicePage('result')
+          }}
+        />
   }
+}
 
   return (
     <ToastContext.Provider value={{ showToast }}>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Send } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
 
 const BASE_URL = import.meta.env.VITE_API_URL
 
@@ -93,8 +94,7 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
         body: JSON.stringify({
           room_id: roomId,
           content: userText,
-          source: 'text',
-          ...(targetFilename && { target_filename: targetFilename }),
+          source: targetFilename ? 'pdf' : 'text',
         }),
         signal: abortControllerRef.current.signal,
       })
@@ -130,25 +130,22 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
   return (
     <div className="flex-1 flex flex-col">
 
-      {/* 분석 결과 보기 버튼 - 파일 있을 때 항상 표시 */}
+      {/* 분석 결과 보기 버튼 */}
       {targetFilename && (
-  <div className="mb-3">
-    <button
-      onClick={() => {
-        console.log('버튼 클릭됨', onGoToAnalysis)
-        onGoToAnalysis?.()
-      }}
-      className="flex items-center gap-2 text-xs text-blue-500 border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/30 px-4 py-2 rounded-xl hover:bg-blue-100 dark:hover:bg-blue-900/50 transition"
-    >
-      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-      </svg>
-      📄 {targetFilename} 분석 결과 보기 →
-    </button>
-  </div>
-)}
+        <div className="mb-3">
+          <button
+            onClick={() => onGoToAnalysis?.()}
+            className="flex items-center gap-2 text-xs text-blue-500 border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/30 px-4 py-2 rounded-xl hover:bg-blue-100 dark:hover:bg-blue-900/50 transition"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            📄 {targetFilename} 분석 결과 보기 →
+          </button>
+        </div>
+      )}
 
-      {/*채팅 시작 전 멘트*/}
+      {/* 채팅 시작 전 */}
       {!started && (
         <div className="flex-1 flex flex-col items-center justify-center gap-6">
           <div className="text-center">
@@ -173,7 +170,7 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
         </div>
       )}
 
-      {/*채팅 시작 후 메시지 영역*/}
+      {/* 채팅 시작 후 메시지 영역 */}
       {started && (
         <div className="flex-1 overflow-y-auto flex flex-col gap-4 mb-4 pr-1">
           {messages.map((msg) => (
@@ -190,18 +187,22 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
               </div>
 
               {/* 말풍선 */}
-              <div className={`max-w-lg px-4 py-3 rounded-2xl text-sm leading-relaxed whitespace-pre-line ${
+              <div className={`max-w-lg px-4 py-3 rounded-2xl text-sm leading-relaxed ${
                 msg.role === 'assistant'
                   ? 'bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-200'
                   : 'bg-blue-600 text-white'
               }`}>
                 {msg.text === '...' && loading
                   ? <span className="animate-pulse text-gray-400">응답 생성 중...</span>
-                  : msg.text
+                  : msg.role === 'user'
+                    ? msg.text
+                    : <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-0.5 prose-li:my-0 prose-ul:my-1 prose-ol:my-1 [&_*]:text-gray-700 dark:[&_*]:text-gray-200">
+                        <ReactMarkdown>{msg.text}</ReactMarkdown>
+                      </div>
                 }
               </div>
 
-              {/*삭제 버튼*/}
+              {/* 삭제 버튼 */}
               <button
                 onClick={async () => {
                   if (!confirm('이 메시지를 삭제할까요?')) return
@@ -226,7 +227,7 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
         </div>
       )}
 
-      {/*채팅 중 빠른 제안 질문 버튼*/}
+      {/* 채팅 중 빠른 제안 */}
       {started && (
         <div className="flex gap-2 mb-3 flex-wrap">
           {suggestions.map((s, i) => (
@@ -241,7 +242,7 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
         </div>
       )}
 
-      {/*입력창, 전송/중단 버튼*/}
+      {/* 입력창 */}
       <div className="flex gap-2 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-2xl p-2 shadow-sm">
         <textarea
           value={input}
