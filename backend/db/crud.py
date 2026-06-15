@@ -190,6 +190,24 @@ def delete_conversation(room_id: str) -> bool:
 
     return deleted_count > 0
 
+# 모든 채팅방과 메시지를 삭제하는 함수
+def delete_all_conversations_and_messages() -> dict:
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # 메시지를 먼저 삭제
+    cursor.execute("DELETE FROM messages")
+
+    # 채팅방 삭제
+    cursor.execute("DELETE FROM conversations")
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "status": "success",
+        "message": "모든 채팅방과 메시지를 삭제했습니다."
+    }
 
 # ==========================================
 # 2. messages CRUD
@@ -457,6 +475,27 @@ def get_documents(conversation_id: str) -> list:
 
     return [dict(row) for row in rows]
 
+# 전체 문서 목록을 조회하는 함수
+def get_all_documents() -> list[dict]:
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT
+            id AS document_id,
+            title AS filename,
+            conversation_id AS room_id,
+            created_at
+        FROM documents
+        ORDER BY created_at DESC
+        """
+    )
+
+    rows = cursor.fetchall() or []
+    conn.close()
+
+    return [dict(row) for row in rows]
 
 # ==========================================
 # 6. tasks CRUD

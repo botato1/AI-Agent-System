@@ -12,6 +12,7 @@ from backend.db.crud import (
     delete_message,
     get_conversation_by_id,
     get_documents,
+    delete_all_conversations_and_messages,
 )
 
 
@@ -82,6 +83,20 @@ def get_chat_rooms():
     return {
         "conversations": conversations
     }
+
+
+# 모든 채팅방과 메시지 전체 삭제 API
+# 실제 경로: DELETE /api/conversations
+@router.delete("/conversations")
+def remove_all_chat_rooms():
+    result = delete_all_conversations_and_messages()
+
+    return {
+        "status": result.get("status", "success"),
+        "message": result.get("message", "모든 채팅방과 메시지가 삭제되었습니다."),
+        "error": None,
+    }
+
 
 # 채팅방 단건 조회 API
 @router.get("/conversations/{room_id}")
