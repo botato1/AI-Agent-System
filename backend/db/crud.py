@@ -672,3 +672,53 @@ def get_tasks(conversation_id: str) -> list:
     conn.close()
 
     return [dict(row) for row in rows]
+
+def get_latest_document_by_conversation(conversation_id: str) -> dict | None:
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT id, title
+        FROM documents
+        WHERE conversation_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        (conversation_id,),
+    )
+
+    row = cursor.fetchone()
+    conn.close()
+
+    if row:
+        return dict(row)
+
+    return None
+
+def get_document_by_filename_and_conversation(
+    conversation_id: str,
+    filename: str
+) -> dict | None:
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT id, title
+        FROM documents
+        WHERE conversation_id = ?
+          AND title = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        (conversation_id, filename),
+    )
+
+    row = cursor.fetchone()
+    conn.close()
+
+    if row:
+        return dict(row)
+
+    return None

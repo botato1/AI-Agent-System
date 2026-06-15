@@ -5,12 +5,51 @@ from zoneinfo import ZoneInfo
 from backend.schemas.chat_schema import ChatRequest
 from backend.schemas.response_schema import ChatResponseSchema
 from backend.schemas.agent_schema import AgentState
-from backend.db.crud import insert_message
+from backend.db.crud import (
+    insert_message,
+    get_latest_document_by_conversation,
+    get_document_by_filename_and_conversation,
+)
 from backend.graphs.agent_graph import agent_graph
 
 
 # ChatRequest를 LangGraph에서 사용할 AgentState로 변환하는 함수
 def create_initial_state(request: ChatRequest) -> AgentState:
+    # 1. 프론트에서 넘어온 문서 정보
+    target_document_id = request.target_document_id
+    target_filename = request.target_filename
+
+    # 2. target_document_id는 없고 target_filename만 있는 경우
+    #    room_id + filename으로 documents 테이블에서 document_id를 찾는다.
+    if not target_document_id and target_filename:
+        matched_document = get_document_by_filename_and_conversation(
+            request.room_id,
+            target_filename
+        )
+
+        if matched_document:
+            target_document_id = matched_document.get("id")
+            target_filename = matched_document.get("title")
+
+    # 3. target_document_id와 target_filename이 둘 다 없는 경우
+    #    현재 채팅방(room_id)에 가장 최근 업로드된 문서를 DB에서 조회한다.
+    if not target_document_id and not target_filename:
+        latest_document = get_latest_document_by_conversation(request.room_id)
+
+        if latest_document:
+            target_document_id = latest_document.get("id")
+            target_filename = latest_document.get("title")
+
+    # 4. RAG 검색 필터 생성
+    #    document_id가 있으면 document_id 우선 사용
+    #    document_id가 없고 filename만 있으면 filename 사용
+    if target_document_id:
+        rag_filter = {"document_id": target_document_id}
+    elif target_filename:
+        rag_filter = {"filename": target_filename}
+    else:
+        rag_filter = None
+
     return {
         # 1. 채팅 기본 정보
         "room_id": request.room_id,
@@ -28,15 +67,10 @@ def create_initial_state(request: ChatRequest) -> AgentState:
         "sources": [],
 
         # 프론트에서 선택한 문서 검색용 필드
-        "target_document_id": request.target_document_id,
-        "target_filename": request.target_filename,
-        "rag_filter": (
-            {"document_id": request.target_document_id}
-            if request.target_document_id
-            else {"filename": request.target_filename}
-            if request.target_filename
-            else None
-        ),
+        # 프론트가 document_id를 안 보내도 filename 또는 room_id 기준으로 자동 보완됨
+        "target_document_id": target_document_id,
+        "target_filename": target_filename,
+        "rag_filter": rag_filter,
 
         # 4. 질문 유형 판단 결과
         "question_type": "general",

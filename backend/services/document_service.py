@@ -1,5 +1,6 @@
 # 문서 업로드 및 처리 서비스
 from pathlib import Path
+from uuid import uuid4
 from fastapi import UploadFile
 import httpx
 
@@ -66,13 +67,18 @@ def _get_source(filename: str, content_type: str | None) -> str:
 # TODO : 문서 처리 코드 완성 후 텍스트 추출/요약/할 일 등 결과를 받아 저장하는 구조로 변경
 async def upload_and_process_document(file: UploadFile, room_id: str) -> dict:
     try:
-        filename = Path(file.filename).name
+        # 0. document_id를 먼저 생성
+        # 이 id를 SQLite documents 테이블과 ChromaDB metadata에 동일하게 사용해야 함
+        document_id = str(uuid4())
+
+        filename = Path(file.filename).name if file.filename else f"{document_id}.file"
 
         # 1. 파일 형식 검사
         if not is_allowed_document_file(file):
             return {
                 "status": "error",
                 "room_id": room_id,
+                "document_id": None,
                 "filename": file.filename,
                 "saved_path": None,
                 "message": "지원하지 않는 파일 형식입니다.",
@@ -92,18 +98,18 @@ async def upload_and_process_document(file: UploadFile, room_id: str) -> dict:
         with open(save_path, "wb") as f:
             f.write(file_content)
 
-        # 6. 파일 형식에 따라 처리 분기
+        # 6. 파일 형식 정보 생성
         suffix = Path(filename).suffix.lower()
         document_type = _get_document_type(filename, file.content_type)
         source = _get_source(filename, file.content_type)
+
         stt_result = None
         ocr_result = None
+        message = "파일 업로드 완료"
 
-        if suffix == ".pdf":
-            load_and_insert(str(save_path))
-            message = "문서 업로드 및 ChromaDB 적재 완료"
-
-        elif suffix in {".png", ".jpg", ".jpeg"}:
+        # 7. 이미지 OCR 처리
+        # develop 코드 유지
+        if suffix in {".png", ".jpg", ".jpeg"}:
             try:
                 async with httpx.AsyncClient(timeout=180.0) as client:
                     with open(save_path, "rb") as img_file:
@@ -111,12 +117,17 @@ async def upload_and_process_document(file: UploadFile, room_id: str) -> dict:
                             "http://localhost:8003/process",
                             files={"file": (filename, img_file, file.content_type)},
                         )
+
                     ocr_result = response.json()
+
                 message = "이미지 OCR 처리 완료"
+
             except Exception as ocr_error:
                 ocr_result = None
                 message = f"이미지 업로드 완료, OCR 처리 실패: {str(ocr_error)}"
 
+        # 8. 음성 STT 처리
+        # develop 코드 유지
         elif file.content_type and file.content_type.startswith("audio/"):
             try:
                 async with httpx.AsyncClient(timeout=120.0) as client:
@@ -126,20 +137,22 @@ async def upload_and_process_document(file: UploadFile, room_id: str) -> dict:
                             files={"file": (filename, audio_file, file.content_type)},
                             data={"topic": ""},
                         )
+
                     stt_result = response.json()
+
                 message = "음성 파일 STT 처리 완료"
+
             except Exception as stt_error:
                 stt_result = None
                 message = f"음성 업로드 완료, STT 처리 실패: {str(stt_error)}"
 
-        else:
-            message = "파일 업로드 완료"
-
-        # 7. 업로드만 해도 채팅방 목록에 나오도록 conversations 생성/갱신
+        # 9. 업로드만 해도 채팅방 목록에 나오도록 conversations 생성/갱신
         ensure_conversation(room_id, filename)
 
-        # 8. GET /api/conversations에서 filename을 반환할 수 있도록 documents 테이블에 저장
-        document_id = save_document_metadata({
+        # 10. documents 테이블에 먼저 저장
+        # 핵심: 여기서 저장된 id를 ChromaDB document_id로도 사용
+        saved_document_id = save_document_metadata({
+            "id": document_id,
             "conversation_id": room_id,
             "title": filename,
             "type": document_type,
@@ -151,11 +164,34 @@ async def upload_and_process_document(file: UploadFile, room_id: str) -> dict:
             "error": "",
         })
 
-        # 9. 성공 결과 반환
+        # 11. PDF는 DB 저장 후 ChromaDB에 적재
+        # 중요: document_id 없이 load_and_insert(str(save_path))를 먼저 호출하면 안 됨
+        if suffix == ".pdf":
+            inserted_document_id = load_and_insert(
+                str(save_path),
+                document_id=saved_document_id,
+                room_id=room_id,
+                upload_context="document"
+            )
+
+            if inserted_document_id is None:
+                return {
+                    "status": "error",
+                    "room_id": room_id,
+                    "document_id": saved_document_id,
+                    "filename": filename,
+                    "saved_path": str(save_path),
+                    "message": "문서는 업로드됐지만 ChromaDB 적재에 실패했습니다.",
+                    "error": "chroma_insert_failed"
+                }
+
+            message = "문서 업로드 및 ChromaDB 적재 완료"
+
+        # 12. 성공 결과 반환
         return {
             "status": "success",
             "room_id": room_id,
-            "document_id": document_id,
+            "document_id": saved_document_id,
             "filename": filename,
             "saved_path": str(save_path),
             "message": message,
@@ -166,6 +202,7 @@ async def upload_and_process_document(file: UploadFile, room_id: str) -> dict:
         return {
             "status": "error",
             "room_id": room_id,
+            "document_id": None,
             "filename": file.filename if file else None,
             "saved_path": None,
             "message": "문서 업로드 또는 처리 중 오류가 발생했습니다.",
