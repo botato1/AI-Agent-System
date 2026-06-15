@@ -323,7 +323,7 @@ def assemble(doc: DocumentResult) -> DocumentSchema:
             confidence_score=avg_conf,
             engines=_collect_engines(doc),
             fallback_used=any(p.fallback_used for p in doc.pages),
-            page_count=len(doc.pages),
+            page_count=max(len(doc.pages), 1),
             file_path=doc.source,
             pdf_type=doc.pdf_type,
             fallback_candidate=fallback_candidate,
