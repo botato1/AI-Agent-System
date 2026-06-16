@@ -66,18 +66,19 @@ def init_db():
     # 5. documents
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS documents (
-        id              TEXT PRIMARY KEY,
-        conversation_id TEXT NOT NULL,
-        title           TEXT NOT NULL,
-        type            TEXT NOT NULL,
-        source          TEXT NOT NULL,
-        file_path       TEXT,
-        summary         TEXT,
-        status          TEXT DEFAULT 'uploaded',
-        notion_url      TEXT,
-        error           TEXT,
-        created_at      TEXT NOT NULL,
-        json_path       TEXT DEFAULT ''
+        id               TEXT PRIMARY KEY,
+        conversation_id  TEXT NOT NULL,
+        title            TEXT NOT NULL,
+        type             TEXT NOT NULL,
+        source           TEXT NOT NULL,
+        file_path        TEXT,
+        json_path        TEXT DEFAULT '',
+        content_markdown TEXT DEFAULT '',
+        summary          TEXT,
+        status           TEXT DEFAULT 'uploaded',
+        notion_url       TEXT,
+        error            TEXT,
+        created_at       TEXT NOT NULL
     )
     """)
 
@@ -99,8 +100,10 @@ def init_db():
     # ── 마이그레이션 (기존 DB에 컬럼 없을 때 자동 추가) ──────────
     migrations = [
         "ALTER TABLE documents ADD COLUMN json_path TEXT DEFAULT ''",
+        "ALTER TABLE documents ADD COLUMN content_markdown TEXT DEFAULT ''",
         "ALTER TABLE tasks ADD COLUMN priority TEXT DEFAULT 'medium'",
     ]
+
     for sql in migrations:
         try:
             cursor.execute(sql)
