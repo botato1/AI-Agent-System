@@ -21,11 +21,9 @@ def make_conversation_title(content: str, max_length: int = 30) -> str:
 # 1. conversations CRUD
 # ==========================================
 
-# 새 채팅방을 생성하는 함수
 def create_conversation(title: str) -> str:
     conv_id = str(uuid.uuid4())
     now = get_utc_now()
-
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -34,7 +32,6 @@ def create_conversation(title: str) -> str:
     )
     conn.commit()
     conn.close()
-
     return conv_id
 
 
@@ -59,7 +56,6 @@ def ensure_conversation(conversation_id: str, title: str = "새 채팅"):
 
 def update_conversation_timestamp(conversation_id: str):
     now = get_utc_now()
-
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -71,6 +67,7 @@ def update_conversation_timestamp(conversation_id: str):
 
 
 def get_conversations() -> list:
+    """전체 채팅방 목록을 최신순으로 조회 (각 채팅방의 최근 문서 제목 포함)"""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -91,61 +88,9 @@ def get_conversations() -> list:
             )
         ORDER BY c.updated_at DESC
     """)
-    row = cursor.fetchall() or []
+    rows = cursor.fetchall() or []
     conn.close()
-
-    if row:
-        return dict(row)
-
-    return None
-
-
-# 채팅방과 해당 채팅방의 메시지를 삭제하는 함수
-def delete_conversation(room_id: str) -> bool:
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """
-        DELETE FROM messages
-        WHERE conversation_id = ?
-        """,
-        (room_id,),
-    )
-
-    cursor.execute(
-        """
-        DELETE FROM conversations
-        WHERE id = ?
-        """,
-        (room_id,),
-    )
-
-    deleted_count = cursor.rowcount
-
-    conn.commit()
-    conn.close()
-
-    return deleted_count > 0
-
-# 모든 채팅방과 메시지를 삭제하는 함수
-def delete_all_conversations_and_messages() -> dict:
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    # 메시지를 먼저 삭제
-    cursor.execute("DELETE FROM messages")
-
-    # 채팅방 삭제
-    cursor.execute("DELETE FROM conversations")
-
-    conn.commit()
-    conn.close()
-
-    return {
-        "status": "success",
-        "message": "모든 채팅방과 메시지를 삭제했습니다."
-    }
+    return [dict(row) for row in rows]
 
 
 def get_conversation_by_id(room_id: str):
@@ -161,15 +106,15 @@ def get_conversation_by_id(room_id: str):
 
 
 def delete_conversation(room_id: str) -> bool:
+    """채팅방과 연관된 모든 데이터(messages, tasks, documents, summaries, facts) 삭제"""
     conn = get_connection()
     cursor = conn.cursor()
-    # 연관 데이터 모두 삭제
-    cursor.execute("DELETE FROM messages      WHERE conversation_id = ?", (room_id,))
-    cursor.execute("DELETE FROM tasks         WHERE conversation_id = ?", (room_id,))
-    cursor.execute("DELETE FROM documents     WHERE conversation_id = ?", (room_id,))
-    cursor.execute("DELETE FROM summaries     WHERE conversation_id = ?", (room_id,))
+    cursor.execute("DELETE FROM messages        WHERE conversation_id = ?", (room_id,))
+    cursor.execute("DELETE FROM tasks           WHERE conversation_id = ?", (room_id,))
+    cursor.execute("DELETE FROM documents       WHERE conversation_id = ?", (room_id,))
+    cursor.execute("DELETE FROM summaries       WHERE conversation_id = ?", (room_id,))
     cursor.execute("DELETE FROM important_facts WHERE conversation_id = ?", (room_id,))
-    cursor.execute("DELETE FROM conversations WHERE id = ?", (room_id,))
+    cursor.execute("DELETE FROM conversations   WHERE id = ?", (room_id,))
     deleted_count = cursor.rowcount
     conn.commit()
     conn.close()
@@ -177,6 +122,7 @@ def delete_conversation(room_id: str) -> bool:
 
 
 def delete_all_conversations_and_messages() -> dict:
+    """전체 채팅방 및 연관 데이터 전부 삭제"""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM tasks")
@@ -194,11 +140,9 @@ def delete_all_conversations_and_messages() -> dict:
 # 2. messages CRUD
 # ==========================================
 
-# 메시지를 저장하고 채팅방이 없으면 자동으로 생성하는 함수
 def insert_message(conversation_id: str, role: str, content: str) -> str:
     msg_id = str(uuid.uuid4())
     now = get_utc_now()
-
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT id FROM conversations WHERE id = ?", (conversation_id,))
@@ -230,7 +174,6 @@ def get_messages(conversation_id: str) -> list:
     )
     rows = cursor.fetchall() or []
     conn.close()
-
     return [dict(row) for row in rows]
 
 
@@ -249,10 +192,8 @@ def delete_message(message_id: str) -> bool:
 # memory_node에서 대화 요약 저장/조회 시 사용
 # ==========================================
 
-# 특정 채팅방의 요약 내용을 저장하는 함수
 def insert_summary(conversation_id: str, summary_text: str, token_count: int = None):
     now = get_utc_now()
-
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -281,16 +222,13 @@ def get_latest_summary(conversation_id: str) -> dict | None:
     return dict(row) if row else None
 
 
-
 # ==========================================
 # 4. important_facts CRUD
 # memory_node에서 중요 정보 저장/조회 시 사용
 # ==========================================
 
-# 특정 채팅방의 중요 정보를 저장하는 함수
 def insert_fact(conversation_id: str, fact_text: str, category: str = "환경"):
     now = get_utc_now()
-
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -315,7 +253,6 @@ def get_all_facts(conversation_id: str) -> list:
     )
     rows = cursor.fetchall() or []
     conn.close()
-
     return [dict(row) for row in rows]
 
 
@@ -323,11 +260,9 @@ def get_all_facts(conversation_id: str) -> list:
 # 5. documents CRUD
 # ==========================================
 
-# 문서 처리 결과를 SQLite에 저장하는 함수
 def save_document_metadata(doc: dict) -> str:
     doc_id = doc.get("id", str(uuid.uuid4()))
     now = get_utc_now()
-
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -354,7 +289,6 @@ def save_document_metadata(doc: dict) -> str:
     )
     conn.commit()
     conn.close()
-
     return doc_id
 
 
@@ -372,33 +306,11 @@ def get_documents(conversation_id: str) -> list:
     )
     rows = cursor.fetchall() or []
     conn.close()
-
-    return [dict(row) for row in rows]
-
-# 전체 문서 목록을 조회하는 함수
-def get_all_documents() -> list[dict]:
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """
-        SELECT
-            id AS document_id,
-            title AS filename,
-            conversation_id AS room_id,
-            created_at
-        FROM documents
-        ORDER BY created_at DESC
-        """
-    )
-
-    rows = cursor.fetchall() or []
-    conn.close()
-
     return [dict(row) for row in rows]
 
 
 def get_all_documents() -> list:
+    """전체 문서 목록 조회"""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
