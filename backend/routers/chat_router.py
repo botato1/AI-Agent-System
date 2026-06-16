@@ -122,6 +122,7 @@ def get_conversation_detail(room_id: str):
             "source": doc["source"],
             "summary": doc["summary"],
             "status": doc["status"],
+            "json_path": doc.get("json_path"),
             "created_at": doc["created_at"],
         }
         for doc in document_rows

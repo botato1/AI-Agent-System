@@ -27,6 +27,7 @@ def get_document_list():
             "document_id": row["document_id"],
             "filename": row["filename"],
             "room_id": row["room_id"],
+            "json_path": row.get("json_path"),
             "created_at": row["created_at"],
         }
         for row in rows
@@ -51,14 +52,19 @@ def save_document_metadata_api(request: DocumentMetadataSaveRequest):
             title=request.filename,
         )
 
-        # 2. 8003에서 받은 document_id를 그대로 documents.id에 저장
+        # 2. 문서 유형에 따라 source 값 설정
+        # 일반 문서/회의록 문서는 pdf, 음성 회의록은 voice로 저장
+        source = "voice" if request.type == "voice" else "pdf"
+
+        # 3. 8003에서 받은 document_id를 그대로 documents.id에 저장
         saved_document_id = save_document_metadata({
             "id": request.document_id,
             "conversation_id": request.room_id,
             "title": request.filename,
-            "type": "document",
-            "source": "pdf",
+            "type": request.type,
+            "source": source,
             "file_path": request.file_path or "",
+            "json_path": request.json_path or "",
             "summary": request.summary or "",
             "status": "processed",
             "notion_url": "",

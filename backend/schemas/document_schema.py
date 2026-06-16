@@ -1,5 +1,5 @@
 # 문서 처리 결과 구조
-from typing import List, Optional
+from typing import List, Optional, Literal
 from pydantic import BaseModel, Field
 
 from backend.schemas.common_schema import CommonDocumentSchema
@@ -27,12 +27,15 @@ class DocumentResultSchema(CommonDocumentSchema):
     chunks: List[ChunkSchema]
     metadata: DocumentMetadata
 
+
 # 문서 메타데이터 저장 요청 구조
 class DocumentMetadataSaveRequest(BaseModel):
     document_id: str = Field(..., min_length=1)   # 8003에서 받은 document_id
     room_id: str = Field(..., min_length=1)        # 채팅방 ID
     filename: str = Field(..., min_length=1)       # 원본 파일명
 
-    file_path: Optional[str] = None                # 8003 원본 PDF 저장 경로
+    type: Literal["document", "meeting", "voice"] = "document"  # 문서 유형
+
+    file_path: Optional[str] = None                # 8003 원본 파일 저장 경로
     json_path: Optional[str] = None                # 8003 JSON 저장 경로
     summary: Optional[str] = None                  # 문서 요약
