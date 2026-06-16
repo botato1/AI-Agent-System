@@ -91,7 +91,7 @@ def get_conversations() -> list:
             )
         ORDER BY c.updated_at DESC
     """)
-    rows = cursor.fetchall() or []
+    row = cursor.fetchall() or []
     conn.close()
 
     if row:
