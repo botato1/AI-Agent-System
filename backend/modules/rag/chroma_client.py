@@ -20,13 +20,14 @@ chroma_client = chromadb.PersistentClient(path=CHROMA_DIR)
 
 # 컬렉션 이름 상수
 MEETING_COLLECTION = "meeting_collection"
+DOCUMENT_COLLECTION = "document_collection"
 KNOWLEDGE_COLLECTION = "knowledge_collection"
 
 # upload_context → 컬렉션 매핑
 CONTEXT_TO_COLLECTION = {
     "voice": MEETING_COLLECTION,
-    "meeting": MEETING_COLLECTION,
-    "document": KNOWLEDGE_COLLECTION,
+    "document": DOCUMENT_COLLECTION,
+    "knowledge": KNOWLEDGE_COLLECTION,
 }
 
 
@@ -48,7 +49,6 @@ def _bm25_path(collection_name: str) -> str:
     return os.path.join(BM25_DIR, f"{collection_name}.pkl")
 
 def _load_bm25_index(collection_name: str) -> dict:
-    """저장된 BM25 인덱스 로드. 없으면 빈 구조 반환"""
     path = _bm25_path(collection_name)
     if os.path.exists(path):
         with open(path, "rb") as f:
@@ -56,7 +56,6 @@ def _load_bm25_index(collection_name: str) -> dict:
     return {"doc_ids": [], "tokenized_docs": []}
 
 def _save_bm25_index(collection_name: str, index_data: dict):
-    """BM25 인덱스 저장"""
     path = _bm25_path(collection_name)
     with open(path, "wb") as f:
         pickle.dump(index_data, f)
@@ -67,14 +66,12 @@ def _build_bm25(tokenized_docs: list) -> BM25Okapi:
     return BM25Okapi(tokenized_docs)
 
 def _update_bm25_index(collection_name: str, doc_id: str, document: str):
-    """문서 추가 시 BM25 인덱스 업데이트"""
     index_data = _load_bm25_index(collection_name)
     index_data["doc_ids"].append(doc_id)
     index_data["tokenized_docs"].append(document.split())
     _save_bm25_index(collection_name, index_data)
 
 def _remove_from_bm25_index(collection_name: str, doc_id: str):
-    """문서 삭제 시 BM25 인덱스에서 제거"""
     index_data = _load_bm25_index(collection_name)
     if doc_id in index_data["doc_ids"]:
         idx = index_data["doc_ids"].index(doc_id)
@@ -87,7 +84,7 @@ def _remove_from_bm25_index(collection_name: str, doc_id: str):
 def insert_document(doc: dict):
     """upload_context 기준으로 컬렉션 자동 분류 후 저장"""
     upload_context = doc.get("upload_context", "document")
-    collection_name = CONTEXT_TO_COLLECTION.get(upload_context, KNOWLEDGE_COLLECTION)
+    collection_name = CONTEXT_TO_COLLECTION.get(upload_context, DOCUMENT_COLLECTION)
     collection = get_or_create_collection(collection_name)
 
     tags = doc.get("tags", [])
@@ -118,7 +115,6 @@ def insert_document(doc: dict):
         }]
     )
 
-    # BM25 인덱스 업데이트
     _update_bm25_index(collection_name, doc["id"], doc["content"])
     print(f"[BGE-M3] 저장 완료 → {collection_name}: {doc.get('title', doc['id'])}")
 
@@ -132,19 +128,18 @@ def search_hybrid(
 ):
     """
     BGE-M3 벡터 (70%) + BM25 키워드 (30%) 하이브리드 검색
-    collection_name 없으면 두 컬렉션 모두 검색 후 합산
+    collection_name 없으면 세 컬렉션 모두 검색 후 합산
     """
     if collection_name:
         target_collections = [collection_name]
     else:
-        target_collections = [MEETING_COLLECTION, KNOWLEDGE_COLLECTION]
+        target_collections = [MEETING_COLLECTION, DOCUMENT_COLLECTION, KNOWLEDGE_COLLECTION]
 
     all_results = []
 
     for col_name in target_collections:
         collection = get_or_create_collection(col_name)
 
-        # 벡터 검색
         try:
             dense_results = collection.query(
                 query_texts=[query_text],
@@ -157,16 +152,16 @@ def search_hybrid(
         if not dense_results or not dense_results["documents"]:
             continue
 
-        # BM25 인덱스 로드
+        # BM25 점수 계산
         index_data = _load_bm25_index(col_name)
         bm25 = _build_bm25(index_data["tokenized_docs"])
         bm25_scores = bm25.get_scores(query_text.split())
+        max_bm25 = max(bm25_scores) if len(bm25_scores) > 0 and max(bm25_scores) > 0 else 1.0
         bm25_score_map = {
             index_data["doc_ids"][i]: bm25_scores[i]
             for i in range(len(index_data["doc_ids"]))
         }
 
-        # 점수 합산
         for i in range(len(dense_results["documents"][0])):
             doc_id = dense_results["ids"][0][i]
             document = dense_results["documents"][0][i]
@@ -175,10 +170,7 @@ def search_hybrid(
 
             semantic_score = 1.0 - distance
             raw_bm25 = bm25_score_map.get(doc_id, 0.0)
-            # BM25 점수 0~1로 정규화
-            max_bm25 = max(bm25_scores) if max(bm25_scores) > 0 else 1.0
             keyword_score = min(raw_bm25 / max_bm25, 1.0)
-
             final_score = (semantic_score * 0.7) + (keyword_score * 0.3)
 
             all_results.append({
@@ -196,7 +188,9 @@ def search_hybrid(
 # ── 문서 삭제 ─────────────────────────────────────────────────
 def delete_document(doc_id: str, collection_name: str = None):
     """특정 컬렉션 또는 전체 컬렉션에서 문서 삭제"""
-    targets = [collection_name] if collection_name else [MEETING_COLLECTION, KNOWLEDGE_COLLECTION]
+    targets = [collection_name] if collection_name else [
+        MEETING_COLLECTION, DOCUMENT_COLLECTION, KNOWLEDGE_COLLECTION
+    ]
 
     for col_name in targets:
         try:
@@ -211,6 +205,8 @@ def delete_document(doc_id: str, collection_name: str = None):
 if __name__ == "__main__":
     print("ChromaDB 연결 확인 중...")
     meeting_col = get_or_create_collection(MEETING_COLLECTION)
+    document_col = get_or_create_collection(DOCUMENT_COLLECTION)
     knowledge_col = get_or_create_collection(KNOWLEDGE_COLLECTION)
     print(f"meeting_collection 준비 완료: {meeting_col.name}")
+    print(f"document_collection 준비 완료: {document_col.name}")
     print(f"knowledge_collection 준비 완료: {knowledge_col.name}")

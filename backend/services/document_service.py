@@ -15,7 +15,7 @@ OCR_URL = os.getenv("OCR_URL", "http://localhost:8003/process")
 # TODO: 문서/음성 처리 담당자와 최종 지원 확장자 확정 필요
 # 현재는 테스트 및 임시 연동을 위한 허용 목록
 ALLOWED_DOCUMENT_EXTENSIONS = {
-    ".pdf",
+    ".pdf",".hwpx",  
     ".png", ".jpg", ".jpeg",
 }
 
@@ -41,7 +41,10 @@ def _get_document_type(filename: str, content_type: str | None) -> str:
     suffix = Path(filename).suffix.lower()
 
     if suffix == ".pdf":
-        return "document"
+        return "pdf"
+
+    if suffix == ".hwpx":
+        return "hwpx"  
 
     if suffix in {".png", ".jpg", ".jpeg"}:
         return "image"
@@ -49,7 +52,7 @@ def _get_document_type(filename: str, content_type: str | None) -> str:
     if content_type and content_type.startswith("audio/"):
         return "voice"
 
-    return "document"
+    return "pdf"
 
 
 def _get_source(filename: str, content_type: str | None) -> str:

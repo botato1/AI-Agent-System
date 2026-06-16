@@ -13,7 +13,7 @@ class ChunkSchema(BaseModel):
     """RAG 적재 단위 청크."""
 
     id: str
-    type: ChunkType
+    content_type: ChunkType
     page_number: int
     content: str
     metadata: ChunkMetadata
