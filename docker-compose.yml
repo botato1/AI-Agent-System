@@ -1,0 +1,62 @@
+services:
+
+  # FastAPI 백엔드
+  fastapi:
+    build: .
+    container_name: ai-agent-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      # SQLite DB NAS 마운트 (서버 경로 확정 후 수정)
+      - /mnt/nas/storage/sqlite:/app/storage/sqlite
+      # 업로드 파일 NAS 마운트 (서버 경로 확정 후 수정)
+      - /mnt/nas/storage/uploads:/app/storage/uploads
+    depends_on:
+      chromadb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: always
+
+  # ChromaDB 벡터DB
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: ai-agent-chromadb
+    ports:
+      - "8001:8000"
+    volumes:
+      # ChromaDB 데이터 NAS 마운트 (서버 경로 확정 후 수정)
+      - /mnt/nas/storage/chroma:/chroma/chroma
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: always
+
+  # Ollama LLM
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ai-agent-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      # Ollama 모델 NAS 마운트 (서버 경로 확정 후 수정)
+      - /mnt/nas/storage/ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    # GPU 패스스루 (NVIDIA Toolkit 설치 확인 후 활성화)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - capabilities: [gpu]
+    restart: always

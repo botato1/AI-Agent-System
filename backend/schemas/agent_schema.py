@@ -17,6 +17,10 @@ class AgentState(TypedDict):
     rag_context: Optional[str]
     sources: List[dict]
 
+    target_document_id: Optional[str]
+    target_filename: Optional[str]
+    rag_filter: Optional[dict]
+
     # 4. 질문 유형 판단 결과
     question_type: str
     need_general_answer: bool
@@ -29,6 +33,9 @@ class AgentState(TypedDict):
     summary: Optional[str]
     tasks: List[dict]
     final_answer: Optional[str]
+
+    # Notion 저장 시 실제로 저장할 내용
+    save_target_content: Optional[str]
 
     # 6. Notion / Graph / 오류 결과
     notion_result: Optional[dict]
