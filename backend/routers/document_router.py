@@ -27,6 +27,7 @@ def get_document_list():
             "document_id": row["document_id"],
             "filename": row["filename"],
             "room_id": row["room_id"],
+            "type": row.get("type"),
             "json_path": row.get("json_path"),
             "created_at": row["created_at"],
         }
@@ -65,6 +66,7 @@ def save_document_metadata_api(request: DocumentMetadataSaveRequest):
             "source": source,
             "file_path": request.file_path or "",
             "json_path": request.json_path or "",
+            "content_markdown": request.content_markdown or "",
             "summary": request.summary or "",
             "status": "processed",
             "notion_url": "",
