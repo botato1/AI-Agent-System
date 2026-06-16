@@ -1,3 +1,4 @@
+# backend/services/ollama_service.py
 import re
 import sys
 import unicodedata
@@ -22,136 +23,75 @@ class OllamaService:
     """
     LangGraph node에서 재사용할 LLM/RAG 보조 함수 모음.
 
-    LLM 프롬프트 생성과 Ollama 호출은 ollama_client.py에서 담당하고,
-    이 서비스는 LangGraph용 분류 보정, RAG filter 생성, sources 정리,
-    client 함수 호출 역할만 담당한다.
+    의도분류 체계 (5개, classify_intent 기준):
+    - task_from_rag     : RAG 자료(회의록/문서) 기반 할일 추출
+    - task_from_memory  : 채팅 기록 기반 할일 추출
+    - notion_save       : RAG 자료를 찾아서 Notion에 저장
+    - knowledge_search  : RAG 자료로 답변 생성
+    - general_answer    : RAG/memory 둘 다 불필요
+
+    task_from_rag/notion_save/knowledge_search 셋은 모두 need_rag=True가 되고,
+    실제 검색할 컬렉션(meeting/document/knowledge)은 rag_service 내부의
+    _select_collections()가 question_type + query 신호어로 결정한다.
     """
 
-    # 한글 파일명 비교를 위해 문자열을 NFC 기준으로 정규화하는 함수
     @staticmethod
     def normalize_text(value: str | None) -> str:
         if not value:
             return ""
-
         return unicodedata.normalize("NFC", value).strip()
 
-    # 사용자 입력을 정규화하는 함수
     @staticmethod
     def normalize_user_input(user_input: str) -> str:
         normalized = normalize_query(user_input)
         return OllamaService.normalize_text(normalized)
 
-    # 사용자 질문에서 파일명을 추출하는 함수
     @staticmethod
     def extract_filename(query: str) -> str | None:
         query = OllamaService.normalize_text(query)
-
         pattern = r"([가-힣a-zA-Z0-9_\-\s]+?\.(?:pdf|docx|doc|md|xlsx|txt|pptx|csv))"
         match = re.search(pattern, query, re.IGNORECASE)
-
         if match:
             return OllamaService.normalize_text(match.group(1))
-
         return None
 
-    # 이전 대화가 필요한 요청인지 키워드로 보정하는 함수
-    @staticmethod
-    def is_memory_request(message: str) -> bool:
-        memory_keywords = [
-            "방금 답변",
-            "방금 내용",
-            "이전 답변",
-            "이전 내용",
-            "아까 답변",
-            "아까 내용",
-            "위 내용",
-            "이 내용",
-            "그 내용",
-            "방금",
-            "아까",
-            "이전에",
-            "전에 말한",
-        ]
+    # ── 키워드 보정 (LLM이 놓쳤을 때 보강용, OR 연산만 — 뒤집지 않음) ──
 
+    @staticmethod
+    def is_memory_source_request(message: str) -> bool:
+        """할 일 추출/검색의 재료를 '채팅 기록'에서 가져와야 하는지"""
+        memory_keywords = [
+            "방금 답변", "방금 내용", "이전 답변", "이전 내용",
+            "아까 답변", "아까 내용", "위 내용", "이 내용",
+            "그 내용", "방금", "아까", "이전에", "전에 말한",
+            "대화에서", "우리가 얘기한", "채팅에서", "나눈 얘기",
+        ]
         return any(keyword in message for keyword in memory_keywords)
 
-    # Notion 저장 요청인지 키워드로 보정하는 함수
     @staticmethod
     def is_notion_save_request(message: str) -> bool:
         message_lower = message.lower()
-
         notion_keywords = ["노션", "notion"]
         save_keywords = ["저장", "기록", "보관", "정리해줘", "올려줘"]
-
         return (
             any(keyword in message_lower for keyword in notion_keywords)
             and any(keyword in message for keyword in save_keywords)
         )
 
-    # 문서 관련 요청인지 키워드로 보정하는 함수
-    @staticmethod
-    def is_document_request(message: str) -> bool:
-        document_keywords = [
-            "pdf",
-            "PDF",
-            "문서",
-            "보고서",
-            "파일",
-            "자료",
-            "첨부",
-            "업로드",
-            "회의록",
-            "에서 찾아",
-            "에서 확인",
-            "에서 요약",
-            "기반으로",
-            "참고해서",
-        ]
-
-        return any(keyword in message for keyword in document_keywords)
-
-    # 문서 요약 요청인지 키워드로 보정하는 함수
-    @staticmethod
-    def is_summary_request(message: str) -> bool:
-        summary_keywords = [
-            "요약",
-            "정리",
-            "핵심",
-            "내용 알려",
-            "내용 설명",
-        ]
-
-        return any(keyword in message for keyword in summary_keywords)
-
-    # 할 일 추출 요청인지 키워드로 보정하는 함수
     @staticmethod
     def is_task_request(message: str) -> bool:
         task_keywords = [
-            "할 일",
-            "해야 할 일",
-            "업무",
-            "태스크",
-            "task",
-            "담당자",
-            "마감일",
-            "액션아이템",
-            "액션 아이템",
+            "할 일", "해야 할 일", "업무", "태스크", "task",
+            "담당자", "마감일", "액션아이템", "액션 아이템",
         ]
-
         return any(keyword in message for keyword in task_keywords)
 
-    # LLM intent 결과를 LangGraph AgentState flag로 변환하는 함수
+    # ── 의도 → AgentState 플래그 매핑 (5개 구조, 변환/뭉치기 없음) ──
+
     @staticmethod
     def map_intent_to_agent_flags(intent: str) -> dict[str, Any]:
-        # 이전 intent 이름과 호환 처리
-        if intent == "task_extraction":
-            intent = "task_extract"
-
-        if intent == "past_record_search":
-            intent = "memory_search"
-
         result = {
-            "question_type": "general",
+            "question_type": "general_answer",
             "need_general_answer": True,
             "need_memory": False,
             "need_rag": False,
@@ -159,36 +99,27 @@ class OllamaService:
             "need_notion_save": False,
         }
 
-        if intent == "document_summary":
-            result["question_type"] = "document_summary"
+        if intent == "task_from_rag":
+            result["question_type"] = "task_from_rag"
             result["need_rag"] = True
+            result["need_task_extract"] = True
 
-        elif intent == "document_question":
-            result["question_type"] = "document_question"
-            result["need_rag"] = True
-
-        elif intent == "task_extract":
-            result["question_type"] = "task_extract"
-            result["need_rag"] = True
+        elif intent == "task_from_memory":
+            result["question_type"] = "task_from_memory"
+            result["need_memory"] = True
             result["need_task_extract"] = True
 
         elif intent == "notion_save":
             result["question_type"] = "notion_save"
+            result["need_rag"] = True
             result["need_notion_save"] = True
 
-        elif intent == "memory_search":
-            result["question_type"] = "memory_search"
-            result["need_memory"] = True
-
-        elif intent == "error_troubleshooting":
-            result["question_type"] = "error_troubleshooting"
+        elif intent == "knowledge_search":
+            result["question_type"] = "knowledge_search"
             result["need_rag"] = True
 
-        elif intent == "term_explanation":
-            result["question_type"] = "term_explanation"
-
-        else:
-            result["question_type"] = "general"
+        else:  # general_answer 또는 알 수 없는 값
+            result["question_type"] = "general_answer"
 
         result["need_general_answer"] = not (
             result["need_memory"]
@@ -199,88 +130,63 @@ class OllamaService:
 
         return result
 
-    # LangGraph classifier_node에서 사용할 의도 분류 함수
+    # ── LangGraph classifier_node에서 사용할 의도 분류 함수 ──
+
     @staticmethod
     def classify_for_graph(user_input: str) -> dict[str, Any]:
         normalized = OllamaService.normalize_user_input(user_input)
 
         try:
             intent_result = classify_intent(normalized)
-            intent = intent_result.get("intent", "general")
+            intent = intent_result.get("intent", "general_answer")
         except Exception as e:
             print(f"[OllamaService classify_for_graph 에러]: {str(e)}")
-            intent = "general"
+            intent = "general_answer"
 
         mapped = OllamaService.map_intent_to_agent_flags(intent)
 
         target_filename = OllamaService.extract_filename(normalized)
 
-        memory_request = OllamaService.is_memory_request(normalized)
-        notion_save_request = OllamaService.is_notion_save_request(normalized)
-        document_request = OllamaService.is_document_request(normalized)
-        summary_request = OllamaService.is_summary_request(normalized)
-        task_request = OllamaService.is_task_request(normalized)
+        # 키워드 보정: LLM이 놓친 경우만 보강 (False → True만 허용, 뒤집지 않음)
+        if OllamaService.is_task_request(normalized) and not mapped["need_task_extract"]:
+            # LLM이 task로 분류 안 했어도 할일 키워드가 있으면
+            # memory_source 여부로 task_from_memory/task_from_rag 결정
+            if OllamaService.is_memory_source_request(normalized):
+                mapped["question_type"] = "task_from_memory"
+                mapped["need_memory"] = True
+                mapped["need_task_extract"] = True
+                mapped["need_rag"] = False
+            else:
+                mapped["question_type"] = "task_from_rag"
+                mapped["need_rag"] = True
+                mapped["need_task_extract"] = True
 
-        # flag를 먼저 모두 계산
-        need_memory = mapped.get("need_memory", False) or memory_request
-        need_notion_save = mapped.get("need_notion_save", False) or notion_save_request
-        need_task_extract = mapped.get("need_task_extract", False) or task_request
-        need_rag = mapped.get("need_rag", False)
+        if OllamaService.is_notion_save_request(normalized) and not mapped["need_notion_save"]:
+            mapped["question_type"] = "notion_save"
+            mapped["need_rag"] = True
+            mapped["need_notion_save"] = True
 
-        if target_filename or document_request:
-            need_rag = True
-
-        if need_task_extract:
-            need_rag = True
-
-        # 방금/이전 답변을 Notion에 저장하는 경우는 RAG를 타지 않음
-        if need_notion_save and need_memory and not need_task_extract:
-            need_rag = False
-
-        # question_type은 마지막에 우선순위 기준으로 한 번만 결정
-        if need_task_extract:
-            question_type = "task_extract"
-        elif need_notion_save and need_memory:
-            question_type = "notion_save"
-        elif need_notion_save and not need_rag:
-            question_type = "notion_save"
-        elif need_memory:
-            question_type = "memory_search"
-        elif need_rag and summary_request:
-            question_type = "document_summary"
-        elif need_rag:
-            question_type = mapped.get("question_type")
-            if question_type not in {
-                "document_summary",
-                "document_question",
-                "error_troubleshooting",
-            }:
-                question_type = "document_question"
-        elif intent == "term_explanation":
-            question_type = "term_explanation"
-        else:
-            question_type = "general"
-
-        need_general_answer = not (
-            need_memory
-            or need_rag
-            or need_task_extract
-            or need_notion_save
+        mapped["need_general_answer"] = not (
+            mapped["need_memory"]
+            or mapped["need_rag"]
+            or mapped["need_task_extract"]
+            or mapped["need_notion_save"]
         )
 
         return {
-            "question_type": question_type,
+            "question_type": mapped["question_type"],
             "intent": intent,
             "normalized_input": normalized,
-            "need_general_answer": need_general_answer,
-            "need_memory": need_memory,
-            "need_rag": need_rag,
-            "need_task_extract": need_task_extract,
-            "need_notion_save": need_notion_save,
+            "need_general_answer": mapped["need_general_answer"],
+            "need_memory": mapped["need_memory"],
+            "need_rag": mapped["need_rag"],
+            "need_task_extract": mapped["need_task_extract"],
+            "need_notion_save": mapped["need_notion_save"],
             "target_filename": target_filename,
         }
 
-    # RAG 검색 filter를 생성하는 함수
+    # ── RAG 검색 filter 생성 ──
+
     @staticmethod
     def build_rag_filter(
         target_document_id: str | None = None,
@@ -289,91 +195,66 @@ class OllamaService:
     ) -> dict | None:
         if existing_filter:
             return existing_filter
-
         if target_document_id:
             return {"document_id": target_document_id}
-
         if target_filename:
             return {"filename": OllamaService.normalize_text(target_filename)}
-
         return None
 
-    # RAG 검색 결과에서 중복 문서 chunk를 제거하는 함수
     @staticmethod
     def deduplicate_docs(docs: list[dict]) -> list[dict]:
         seen = set()
         unique_docs = []
-
         for doc in docs:
             title = OllamaService.normalize_text(doc.get("title"))
             content = (doc.get("content") or "").strip()
-
-            dedupe_key = (
-                title,
-                content,
-            )
-
+            dedupe_key = (title, content)
             if dedupe_key in seen:
                 continue
-
             seen.add(dedupe_key)
             unique_docs.append(doc)
-
         return unique_docs
 
-    # RAG 검색 결과를 응답용 sources 구조로 변환하는 함수
     @staticmethod
     def format_sources(docs: list[dict]) -> list[dict]:
         sources = []
         seen = set()
-
         for doc in docs:
             title = doc.get("title")
             source = doc.get("source") or doc.get("filename") or title
-
             dedupe_key = (
                 OllamaService.normalize_text(title),
                 OllamaService.normalize_text(source),
             )
-
             if dedupe_key in seen:
                 continue
-
             seen.add(dedupe_key)
-
-            sources.append(
-                {
-                    "id": doc.get("id") or doc.get("document_id") or doc.get("chroma_id"),
-                    "title": title,
-                    "source": source,
-                    "source_url": doc.get("source_url"),
-                    "data_type": doc.get("data_type"),
-                    "score": doc.get("score"),
-                    "importance": doc.get("importance") or doc.get("importance_score"),
-                    "created_at": doc.get("created_at"),
-                    "notion_url": doc.get("notion_url"),
-                    "tags": doc.get("tags"),
-                }
-            )
-
+            sources.append({
+                "id": doc.get("id") or doc.get("document_id") or doc.get("chroma_id"),
+                "title": title,
+                "source": source,
+                "source_url": doc.get("source_url"),
+                "data_type": doc.get("data_type"),
+                "score": doc.get("score"),
+                "importance": doc.get("importance") or doc.get("importance_score"),
+                "created_at": doc.get("created_at"),
+                "notion_url": doc.get("notion_url"),
+                "tags": doc.get("tags"),
+            })
         return sources
 
-    # 파일명이 title에 포함되어 있는지 NFC 정규화 후 비교하는 함수
     @staticmethod
     def filename_in_title(target_filename: str | None, title: str | None) -> bool:
         normalized_filename = OllamaService.normalize_text(target_filename)
         normalized_title = OllamaService.normalize_text(title)
-
         if not normalized_filename or not normalized_title:
             return False
-
         return normalized_filename in normalized_title
 
-    # answer_node에서 사용할 답변 생성 함수 호출
     @staticmethod
     def generate_answer_for_graph(
         user_message: str,
-        question_type: str = "general",
+        question_type: str = "general_answer",
         rag_context: str | None = None,
         memory_context: str | None = None,
         tasks: list | None = None,
@@ -386,17 +267,16 @@ class OllamaService:
             tasks=tasks or [],
         )
 
-    # task_node에서 사용할 할 일 추출 함수 호출
     @staticmethod
     def extract_tasks_from_content(content: str) -> list[dict]:
         return client_extract_tasks_from_content(content)
 
-    # notion_node에서 사용할 Notion 저장용 요약 생성 함수 호출
     @staticmethod
     def generate_summary_for_notion(content: str) -> str | None:
         return client_generate_summary_for_notion(content)
 
-    # 단일 파이프라인 테스트용 함수
+    # ── 단일 파이프라인 테스트용 함수 ──
+
     @staticmethod
     def process_query(user_input: str, conversation_id: str = None) -> dict:
         try:
@@ -409,30 +289,22 @@ class OllamaService:
                 rag_filter = OllamaService.build_rag_filter(
                     target_filename=classified.get("target_filename")
                 )
-
                 rag_result = rag_service.retrieve_relevant_knowledge_sync(
                     query=classified.get("normalized_input") or user_input,
                     top_k=5,
                     filter=rag_filter,
-                    question_type=classified.get("question_type", "general"),
+                    question_type=classified.get("question_type", "general_answer"),
                 )
-
                 if rag_result and rag_result.get("count", 0) > 0:
                     docs = OllamaService.deduplicate_docs(rag_result.get("data", []))
-
                     rag_context = "\n\n".join(
-                        [
-                            doc.get("content", "")
-                            for doc in docs
-                            if doc.get("content")
-                        ]
+                        [doc.get("content", "") for doc in docs if doc.get("content")]
                     )
-
                     sources = OllamaService.format_sources(docs)
 
             answer = OllamaService.generate_answer_for_graph(
                 user_message=user_input,
-                question_type=classified.get("question_type", "general"),
+                question_type=classified.get("question_type", "general_answer"),
                 rag_context=rag_context,
             )
 
@@ -450,13 +322,12 @@ class OllamaService:
 
         except Exception as e:
             print(f"[OllamaService 에러]: {str(e)}")
-
             return {
                 "status": "error",
                 "original_input": user_input,
                 "normalized_input": user_input,
-                "question_type": "general",
-                "intent": "general",
+                "question_type": "general_answer",
+                "intent": "general_answer",
                 "need_rag": False,
                 "answer": "처리 중 오류가 발생했습니다.",
                 "sources": [],
