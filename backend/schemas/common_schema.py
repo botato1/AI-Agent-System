@@ -19,3 +19,4 @@ class CommonDocumentSchema(BaseModel):
     error: Optional[str] = None
 
     user_edited : bool = False  # 사용자가 STT/문서 처리 결과를 직접 수정했는지 여부
+    chunks: List[str] = []      # RAG/LLM 팀을 위한 텍스트 조각 리스트
