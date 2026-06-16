@@ -38,4 +38,5 @@ class DocumentMetadataSaveRequest(BaseModel):
 
     file_path: Optional[str] = None                # 8003 원본 파일 저장 경로
     json_path: Optional[str] = None                # 8003 JSON 저장 경로
+    content_markdown: Optional[str] = None         # 마크다운 형식의 문서 전체 텍스트
     summary: Optional[str] = None                  # 문서 요약
