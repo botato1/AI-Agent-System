@@ -260,17 +260,19 @@ def get_all_facts(conversation_id: str) -> list:
 # 5. documents CRUD
 # ==========================================
 
+# 문서 처리 결과를 SQLite에 저장하는 함수
 def save_document_metadata(doc: dict) -> str:
     doc_id = doc.get("id", str(uuid.uuid4()))
     now = get_utc_now()
+
     conn = get_connection()
     cursor = conn.cursor()
+
     cursor.execute(
         """
         INSERT INTO documents
-        (id, conversation_id, title, type, source,
-         file_path, summary, status, notion_url, error, created_at, json_path)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, conversation_id, title, type, source, file_path, json_path, content_markdown, summary, status, notion_url, error, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             doc_id,
@@ -279,16 +281,19 @@ def save_document_metadata(doc: dict) -> str:
             doc.get("type", "document"),
             doc.get("source", ""),
             doc.get("file_path", ""),
+            doc.get("json_path", ""),
+            doc.get("content_markdown", ""),
             doc.get("summary", ""),
             doc.get("status", "processed"),
             doc.get("notion_url", ""),
             doc.get("error", ""),
             now,
-            doc.get("json_path", ""),
         ),
     )
+
     conn.commit()
     conn.close()
+
     return doc_id
 
 
@@ -319,6 +324,7 @@ def get_all_documents() -> list:
             id              AS document_id,
             title           AS filename,
             conversation_id AS room_id,
+            type,
             json_path,
             created_at
         FROM documents
