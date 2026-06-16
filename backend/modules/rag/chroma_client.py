@@ -18,16 +18,16 @@ os.makedirs(BM25_DIR, exist_ok=True)
 
 chroma_client = chromadb.PersistentClient(path=CHROMA_DIR)
 
-# ── 컬렉션 이름 상수 ──────────────────────────────────────────
-MEETING_COLLECTION  = "meeting_collection"
-DOCUMENT_COLLECTION = "document_collection"   # 신규 추가
+# 컬렉션 이름 상수
+MEETING_COLLECTION = "meeting_collection"
+DOCUMENT_COLLECTION = "document_collection"
 KNOWLEDGE_COLLECTION = "knowledge_collection"
 
 # upload_context → 컬렉션 매핑
 CONTEXT_TO_COLLECTION = {
-    "voice":    MEETING_COLLECTION,    # 음성 STT → 회의록
-    "meeting":  MEETING_COLLECTION,    # 사용자가 "회의록"으로 올린 문서
-    "document": DOCUMENT_COLLECTION,   # 사용자가 "참고문서"로 올린 문서
+    "voice": MEETING_COLLECTION,
+    "document": DOCUMENT_COLLECTION,
+    "knowledge": KNOWLEDGE_COLLECTION,
 }
 
 
@@ -48,7 +48,6 @@ def get_or_create_collection(collection_name: str):
 def _bm25_path(collection_name: str) -> str:
     return os.path.join(BM25_DIR, f"{collection_name}.pkl")
 
-
 def _load_bm25_index(collection_name: str) -> dict:
     path = _bm25_path(collection_name)
     if os.path.exists(path):
@@ -56,25 +55,21 @@ def _load_bm25_index(collection_name: str) -> dict:
             return pickle.load(f)
     return {"doc_ids": [], "tokenized_docs": []}
 
-
 def _save_bm25_index(collection_name: str, index_data: dict):
     path = _bm25_path(collection_name)
     with open(path, "wb") as f:
         pickle.dump(index_data, f)
-
 
 def _build_bm25(tokenized_docs: list) -> BM25Okapi:
     if not tokenized_docs:
         return BM25Okapi([[""]])
     return BM25Okapi(tokenized_docs)
 
-
 def _update_bm25_index(collection_name: str, doc_id: str, document: str):
     index_data = _load_bm25_index(collection_name)
     index_data["doc_ids"].append(doc_id)
     index_data["tokenized_docs"].append(document.split())
     _save_bm25_index(collection_name, index_data)
-
 
 def _remove_from_bm25_index(collection_name: str, doc_id: str):
     index_data = _load_bm25_index(collection_name)
@@ -87,224 +82,131 @@ def _remove_from_bm25_index(collection_name: str, doc_id: str):
 
 # ── 문서 저장 ─────────────────────────────────────────────────
 def insert_document(doc: dict):
+    """upload_context 기준으로 컬렉션 자동 분류 후 저장"""
     upload_context = doc.get("upload_context", "document")
-    collection_name = CONTEXT_TO_COLLECTION.get(upload_context, KNOWLEDGE_COLLECTION)
+    collection_name = CONTEXT_TO_COLLECTION.get(upload_context, DOCUMENT_COLLECTION)
     collection = get_or_create_collection(collection_name)
 
     tags = doc.get("tags", [])
     if isinstance(tags, list):
         tags = ",".join(tags)
 
-    metadata = {
-        "title":            doc.get("title", ""),
-        "type":             doc.get("type", "document"),
-        "source":           doc.get("source", ""),
-        "language":         doc.get("language", "ko"),
-        "created_at":       doc.get("created_at", ""),
-        "status":           doc.get("status", "processed"),
-        "notion_url":       doc.get("notion_url") or "",
-        "chroma_id":        doc.get("id", ""),
-        "error":            doc.get("error") or "",
-        "user_edited":      doc.get("user_edited", False),
-        "tags":             tags,
-        "importance_score": doc.get("importance_score", 50),
-        "document_id":      doc.get("document_id", ""),
-        "filename":         doc.get("filename", ""),
-        "upload_context":   upload_context,
-        "chunk_index":      doc.get("chunk_index", 0),
-        "room_id":          doc.get("room_id", ""),
-        "tech_score":       doc.get("tech_score", 0),   # 신규: 크롤링 문서용
-    }
-
-    print("[insert_document] collection:", collection_name)
-    print("[insert_document] chunk_id:", doc.get("id"))
-    print("[insert_document] document_id:", metadata.get("document_id"))
-    print("[insert_document] filename:", metadata.get("filename"))
-    print("[insert_document] room_id:", metadata.get("room_id"))
-
     collection.add(
         ids=[doc["id"]],
         documents=[doc["content"]],
-        metadatas=[metadata]
+        metadatas=[{
+            "title": doc.get("title", ""),
+            "type": doc.get("type", "document"),
+            "source": doc.get("source", ""),
+            "language": doc.get("language", "ko"),
+            "created_at": doc.get("created_at", ""),
+            "status": doc.get("status", "processed"),
+            "notion_url": doc.get("notion_url") or "",
+            "chroma_id": doc.get("id", ""),
+            "error": doc.get("error") or "",
+            "user_edited": doc.get("user_edited", False),
+            "tags": tags,
+            "importance_score": doc.get("importance_score", 50),
+            "document_id": doc.get("document_id", ""),
+            "filename": doc.get("filename", ""),
+            "upload_context": upload_context,
+            "chunk_index": doc.get("chunk_index", 0),
+            "room_id": doc.get("room_id", ""),
+        }]
     )
+
     _update_bm25_index(collection_name, doc["id"], doc["content"])
     print(f"[BGE-M3] 저장 완료 → {collection_name}: {doc.get('title', doc['id'])}")
-
-
-# ── Reranker ─────────────────────────────────────────────────
-_reranker = None
-
-def _get_reranker():
-    global _reranker
-    if _reranker is None:
-        from FlagEmbedding import FlagReranker
-        _reranker = FlagReranker("BAAI/bge-reranker-v2-m3", use_fp16=True)
-    return _reranker
-
-
-def rerank_results(query_text: str, results: list[dict]) -> list[dict]:
-    """
-    results 각각의 content와 query를 cross-encoder로 재평가.
-    각 결과에 reranker_score 필드를 추가하고 반환 (정렬은 하지 않음).
-    FlagEmbedding 미설치 시 reranker_score = hybrid_score로 fallback.
-    """
-    if not results:
-        return results
-
-    try:
-        reranker = _get_reranker()
-        pairs = [[query_text, r.get("content", "")] for r in results]
-        scores = reranker.compute_score(pairs, normalize=True)
-
-        if isinstance(scores, float):
-            scores = [scores]
-
-        for r, s in zip(results, scores):
-            r["reranker_score"] = float(s)
-
-    except Exception as e:
-        print(f"[rerank_results] reranker 실패, hybrid_score로 fallback: {e}")
-        for r in results:
-            r["reranker_score"] = r.get("score", 0.0)
-
-    return results
 
 
 # ── 하이브리드 검색 ───────────────────────────────────────────
 def search_hybrid(
     query_text: str,
-    top_k: int = 60,
-    filter: dict | None = None,
-    collection_name: str | None = None
+    top_k: int = 5,
+    filter: dict = None,
+    collection_name: str = None
 ):
     """
-    BGE-M3 벡터 70% + BM25 키워드 30% 하이브리드 검색.
-    collection_name을 지정하면 해당 컬렉션만 검색.
+    BGE-M3 벡터 (70%) + BM25 키워드 (30%) 하이브리드 검색
+    collection_name 없으면 세 컬렉션 모두 검색 후 합산
     """
-    target_collections = [collection_name] if collection_name else [
-        MEETING_COLLECTION, DOCUMENT_COLLECTION, KNOWLEDGE_COLLECTION
-    ]
+    if collection_name:
+        target_collections = [collection_name]
+    else:
+        target_collections = [MEETING_COLLECTION, DOCUMENT_COLLECTION, KNOWLEDGE_COLLECTION]
 
     all_results = []
-
-    print("[search_hybrid] query_text:", query_text)
-    print("[search_hybrid] filter:", filter)
-    print("[search_hybrid] target_collections:", target_collections)
 
     for col_name in target_collections:
         collection = get_or_create_collection(col_name)
 
         try:
-            query_kwargs = {
-                "query_texts": [query_text],
-                "n_results": top_k,
-                "include": ["documents", "metadatas", "distances"],
-            }
-            if filter:
-                query_kwargs["where"] = filter
-
-            dense_results = collection.query(**query_kwargs)
-
-        except Exception as e:
-            print(f"[search_hybrid 에러] collection: {col_name}, error: {e}")
+            dense_results = collection.query(
+                query_texts=[query_text],
+                n_results=top_k,
+                where=filter
+            )
+        except Exception:
             continue
 
-        if not dense_results:
+        if not dense_results or not dense_results["documents"]:
             continue
 
-        documents = dense_results.get("documents", [[]])
-        ids       = dense_results.get("ids", [[]])
-        metadatas = dense_results.get("metadatas", [[]])
-        distances = dense_results.get("distances", [[]])
-
-        if not documents or not documents[0]:
-            continue
-
-        print(f"[search_hybrid] collection: {col_name}, dense count: {len(documents[0])}")
-
+        # BM25 점수 계산
         index_data = _load_bm25_index(col_name)
-        bm25       = _build_bm25(index_data["tokenized_docs"])
+        bm25 = _build_bm25(index_data["tokenized_docs"])
         bm25_scores = bm25.get_scores(query_text.split())
-
+        max_bm25 = max(bm25_scores) if len(bm25_scores) > 0 and max(bm25_scores) > 0 else 1.0
         bm25_score_map = {
             index_data["doc_ids"][i]: bm25_scores[i]
             for i in range(len(index_data["doc_ids"]))
         }
-        max_bm25 = max(bm25_scores) if len(bm25_scores) > 0 and max(bm25_scores) > 0 else 1.0
 
-        for i in range(len(documents[0])):
-            doc_id   = ids[0][i]
-            document = documents[0][i]
-            metadata = metadatas[0][i]
-            distance = distances[0][i] if distances and distances[0] else 1.0
+        for i in range(len(dense_results["documents"][0])):
+            doc_id = dense_results["ids"][0][i]
+            document = dense_results["documents"][0][i]
+            metadata = dense_results["metadatas"][0][i]
+            distance = dense_results["distances"][0][i] if "distances" in dense_results else 1.0
 
             semantic_score = 1.0 - distance
-            raw_bm25       = bm25_score_map.get(doc_id, 0.0)
-            keyword_score  = min(raw_bm25 / max_bm25, 1.0)
-            final_score    = (semantic_score * 0.7) + (keyword_score * 0.3)
+            raw_bm25 = bm25_score_map.get(doc_id, 0.0)
+            keyword_score = min(raw_bm25 / max_bm25, 1.0)
+            final_score = (semantic_score * 0.7) + (keyword_score * 0.3)
 
             all_results.append({
-                "id":          doc_id,
-                "content":     document,
-                "document":    document,
-                "metadata":    metadata,
-                "score":       round(final_score, 4),
-                "collection":  col_name,
-                "title":       metadata.get("title", ""),
-                "source":      metadata.get("source", ""),
-                "filename":    metadata.get("filename", ""),
-                "document_id": metadata.get("document_id", ""),
-                "room_id":     metadata.get("room_id", ""),
-                "chunk_index": metadata.get("chunk_index", 0),
+                "id": doc_id,
+                "document": document,
+                "metadata": metadata,
+                "score": round(final_score, 4),
+                "collection": col_name
             })
 
     all_results.sort(key=lambda x: x["score"], reverse=True)
-    print("[search_hybrid] final count:", len(all_results[:top_k]))
     return all_results[:top_k]
 
 
-# ── ChromaDB 직접 확인용 ──────────────────────────────────────
-def get_documents_by_document_id(document_id: str) -> dict:
-    total_ids, total_metadatas, total_documents = [], [], []
-
-    for collection_name in [MEETING_COLLECTION, DOCUMENT_COLLECTION, KNOWLEDGE_COLLECTION]:
-        collection = get_or_create_collection(collection_name)
-        try:
-            result = collection.get(
-                where={"document_id": document_id},
-                include=["metadatas", "documents"]
-            )
-            total_ids.extend(result.get("ids", []))
-            total_metadatas.extend(result.get("metadatas", []))
-            total_documents.extend(result.get("documents", []))
-        except Exception as e:
-            print(f"[Chroma get 에러] collection: {collection_name}, error: {e}")
-
-    return {
-        "ids":       total_ids,
-        "metadatas": total_metadatas,
-        "documents": total_documents,
-        "count":     len(total_ids),
-    }
-
-
 # ── 문서 삭제 ─────────────────────────────────────────────────
-def delete_document(doc_id: str, collection_name: str | None = None):
+def delete_document(doc_id: str, collection_name: str = None):
+    """특정 컬렉션 또는 전체 컬렉션에서 문서 삭제"""
     targets = [collection_name] if collection_name else [
         MEETING_COLLECTION, DOCUMENT_COLLECTION, KNOWLEDGE_COLLECTION
     ]
+
     for col_name in targets:
         try:
             collection = get_or_create_collection(col_name)
             collection.delete(ids=[doc_id])
             _remove_from_bm25_index(col_name, doc_id)
             print(f"[삭제 완료] {col_name}: {doc_id}")
-        except Exception as e:
-            print(f"[삭제 에러] {col_name}: {doc_id}, error: {e}")
+        except Exception:
+            continue
 
 
 if __name__ == "__main__":
     print("ChromaDB 연결 확인 중...")
-    for name in [MEETING_COLLECTION, DOCUMENT_COLLECTION, KNOWLEDGE_COLLECTION]:
-        col = get_or_create_collection(name)
-        print(f"{name} 준비 완료: {col.name}")
+    meeting_col = get_or_create_collection(MEETING_COLLECTION)
+    document_col = get_or_create_collection(DOCUMENT_COLLECTION)
+    knowledge_col = get_or_create_collection(KNOWLEDGE_COLLECTION)
+    print(f"meeting_collection 준비 완료: {meeting_col.name}")
+    print(f"document_collection 준비 완료: {document_col.name}")
+    print(f"knowledge_collection 준비 완료: {knowledge_col.name}")
