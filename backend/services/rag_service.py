@@ -9,10 +9,15 @@ if str(BASE_DIR) not in sys.path:
 
 from backend.modules.rag.chroma_client import (
     search_hybrid,
+    rerank_results,
     MEETING_COLLECTION,
     DOCUMENT_COLLECTION,
     KNOWLEDGE_COLLECTION,
 )
+
+# ── 상수 ─────────────────────────────────────────────────────
+CANDIDATE_K  = 60      # 하이브리드 검색에서 가져올 후보 수
+SCALE_FACTOR = 0.0005  # tech_score 보정 가중치 (실측 후 조정)
 
 
 def get_utc_now() -> str:
@@ -20,7 +25,6 @@ def get_utc_now() -> str:
 
 
 def is_rag_result_relevant(rag_result: dict, min_score: float = 0.5) -> bool:
-    """RAG 검색 결과가 충분히 관련있는지 판단"""
     if rag_result.get("status") != "success":
         return False
     if rag_result.get("count", 0) == 0:
@@ -32,22 +36,62 @@ def is_rag_result_relevant(rag_result: dict, min_score: float = 0.5) -> bool:
     return top_score >= min_score
 
 
-def _select_collection(question_type: str) -> str | None:
+def _has_specific_document_filter(filter: dict | None) -> bool:
+    if not filter:
+        return False
+    return bool(filter.get("document_id") or filter.get("filename"))
+
+
+# ── 컬렉션 선택 (복수 반환) ───────────────────────────────────
+def _select_collections(
+    question_type: str,
+    query: str = "",
+    filter: dict | None = None,
+) -> list[str]:
     """
-    question_type 기반으로 검색할 컬렉션 선택 (2차 판단)
-    None 반환 시 3개 컬렉션 전체 검색
+    question_type + query 신호어 기반으로
+    검색할 컬렉션 리스트 반환.
+    복수 반환 가능 (각각 검색 후 합산).
     """
-    if question_type in ("task_extract", "past_record_search", "memory_search"):
-        return MEETING_COLLECTION
+    all_collections = [MEETING_COLLECTION, DOCUMENT_COLLECTION, KNOWLEDGE_COLLECTION]
 
-    elif question_type == "error_troubleshooting":
-        return KNOWLEDGE_COLLECTION
+    # 특정 문서 지정 → 전체 검색
+    if _has_specific_document_filter(filter):
+        return all_collections
 
-    elif question_type in ("document_summary", "document_question"):
-        return DOCUMENT_COLLECTION
+    # 확정 케이스
+    if question_type == "task_extract":
+        return [MEETING_COLLECTION]
 
-    else:
-        return None
+    if question_type == "error_troubleshooting":
+        return [KNOWLEDGE_COLLECTION]
+
+    # document_summary / document_question → 신호어로 세분화
+    meeting_signals = [
+        "회의", "저번에", "말했던", "논의", "액션아이템",
+        "참석자", "지난", "미팅", "회의록",
+    ]
+    document_signals = [
+        "문서", "파일", "보냈던", "올린", "자료",
+        "보고서", "pdf", "첨부",
+    ]
+    knowledge_signals = [
+        "에러", "오류", "방법", "설치", "설정", "코드",
+        "쿠버", "도커", "kubernetes", "docker", "pod",
+        "배포", "파이프라인",
+    ]
+
+    has_meeting  = any(s in query for s in meeting_signals)
+    has_document = any(s in query for s in document_signals)
+    has_knowledge = any(s in query for s in knowledge_signals)
+
+    targets = []
+    if has_meeting:   targets.append(MEETING_COLLECTION)
+    if has_document:  targets.append(DOCUMENT_COLLECTION)
+    if has_knowledge: targets.append(KNOWLEDGE_COLLECTION)
+
+    # 신호어 불명확 → 전체
+    return targets if targets else all_collections
 
 
 class RAGService:
@@ -61,109 +105,142 @@ class RAGService:
         filter: dict = None,
         question_type: str = "general",
     ):
-        """
-        하이브리드 검색 (BGE-M3 벡터 + BM25 키워드)
-        → question_type으로 컬렉션 자동 선택 (2차 판단)
-        → 절대/상대 점수 필터링
-        → 품질 검증
-        → 공통키 + 문서 식별 필드 반환
-
-        filter 예시
-        → {"type": "meeting"}            회의록만
-        → {"document_id": "uuid"}        특정 문서만
-        → {"filename": "회의록.pdf"}     특정 파일만
-        → {"upload_context": "document"} 문서 업로드만
-        """
         print(f"[RAG Service] 쿼리: '{query}' / 타입: '{question_type}'")
+        print(f"[RAG Service] filter: {filter}")
 
         try:
-            # 2차 판단 — 컬렉션 선택
-            collection_name = _select_collection(question_type)
-            print(f"[RAG Service] 검색 컬렉션: {collection_name or '전체'}")
-
-            raw_results = search_hybrid(
-                query_text=query,
-                top_k=top_k,
+            # 1. 검색할 컬렉션 결정 (복수 가능)
+            collections = _select_collections(
+                question_type=question_type,
+                query=query,
                 filter=filter,
-                collection_name=collection_name,
             )
+            print(f"[RAG Service] 검색 컬렉션: {collections}")
 
-            if not raw_results:
+            # 2. 컬렉션별 검색 후 합산
+            all_results = []
+            seen_ids = set()
+
+            for col in collections:
+                results = search_hybrid(
+                    query_text=query,
+                    top_k=CANDIDATE_K,
+                    filter=filter,
+                    collection_name=col,
+                )
+                for r in results:
+                    if r["id"] not in seen_ids:
+                        seen_ids.add(r["id"])
+                        all_results.append(r)
+
+            if not all_results:
                 return {
                     "status": "success",
                     "query": query,
                     "count": 0,
                     "data": [],
-                    "error": None
+                    "error": None,
                 }
 
-            max_score = raw_results[0]["score"]
+            # 3. reranker 적용
+            all_results = rerank_results(query, all_results)
+
+            # 4. final_score 계산
+            for res in all_results:
+                reranker_score = res.get("reranker_score", 0.0)
+                collection     = res.get("collection", "")
+
+                if collection == KNOWLEDGE_COLLECTION:
+                    tech_score = res.get("metadata", {}).get("tech_score", 0)
+                    res["final_score"] = reranker_score + tech_score * SCALE_FACTOR
+                else:
+                    # meeting / document 컬렉션은 tech_score 보정 없음
+                    res["final_score"] = reranker_score
+
+            # 5. final_score 기준 정렬
+            all_results.sort(key=lambda x: x["final_score"], reverse=True)
+
+            # 6. 필터링 (final_score 기준)
+            max_score = all_results[0]["final_score"]
             min_absolute_bound = 0.1
             processed_documents = []
 
-            for res in raw_results:
-                relative_ratio = res["score"] / max_score if max_score > 0 else 0
+            for res in all_results:
+                relative_ratio = res["final_score"] / max_score if max_score > 0 else 0
 
-                if res["score"] < min_absolute_bound or relative_ratio < relative_threshold:
-                    print(f"[탈락] 점수: {res['score']}")
+                if (
+                    res["final_score"] < min_absolute_bound
+                    or relative_ratio < relative_threshold
+                ):
+                    print(f"[탈락] final_score: {res['final_score']:.4f}")
                     continue
 
-                meta = res["metadata"]
+                meta = res.get("metadata", {})
 
                 processed_documents.append({
-                    "id": res["id"],
-                    "content": res["document"],
-                    "title": meta.get("title", "제목 없음"),
-                    "type": meta.get("type", "document"),
-                    "source": meta.get("source", ""),
-                    "language": meta.get("language", "ko"),
-                    "created_at": meta.get("created_at", get_utc_now()),
-                    "status": meta.get("status", "processed"),
-                    "notion_url": meta.get("notion_url", ""),
-                    "chroma_id": meta.get("chroma_id", ""),
-                    "error": meta.get("error", ""),
-                    "user_edited": meta.get("user_edited", False),
-                    "tags": meta.get("tags", ""),
+                    "id":             res.get("id", ""),
+                    "content":        res.get("content") or res.get("document", ""),
+                    "title":          meta.get("title", "제목 없음"),
+                    "type":           meta.get("type", "document"),
+                    "source":         meta.get("source", ""),
+                    "language":       meta.get("language", "ko"),
+                    "created_at":     meta.get("created_at", get_utc_now()),
+                    "status":         meta.get("status", "processed"),
+                    "notion_url":     meta.get("notion_url", ""),
+                    "chroma_id":      meta.get("chroma_id", ""),
+                    "error":          meta.get("error", ""),
+                    "user_edited":    meta.get("user_edited", False),
+                    "tags":           meta.get("tags", ""),
                     "importance_score": meta.get("importance_score", 0),
-                    "score": res["score"],
-                    "document_id": meta.get("document_id", ""),
-                    "filename": meta.get("filename", ""),
-                    "chunk_index": meta.get("chunk_index", 0),
+                    "score":          res.get("final_score", 0),       # 최종 점수
+                    "reranker_score": res.get("reranker_score", 0),    # 디버깅용
+                    "tech_score":     meta.get("tech_score", 0),       # 디버깅용
+                    "document_id":    meta.get("document_id", ""),
+                    "filename":       meta.get("filename", ""),
+                    "chunk_index":    meta.get("chunk_index", 0),
                     "upload_context": meta.get("upload_context", ""),
-                    "room_id": meta.get("room_id", ""),
-                    "collection": res.get("collection", ""),
+                    "room_id":        meta.get("room_id", ""),
+                    "collection":     res.get("collection", ""),
                 })
 
-            # 품질 검증
+            # 7. top_k 자르기 (여기서 처음 절단)
+            processed_documents = processed_documents[:top_k]
+
             result = {
                 "status": "success",
-                "query": query,
-                "count": len(processed_documents),
-                "data": processed_documents,
-                "error": None
+                "query":  query,
+                "count":  len(processed_documents),
+                "data":   processed_documents,
+                "error":  None,
             }
 
+            # 특정 문서 검색은 품질 검증 생략
+            if _has_specific_document_filter(filter):
+                print(f"[RAG Service] 특정 문서 검색 완료 → {len(processed_documents)}개 반환")
+                return result
+
+            # 일반 검색 품질 검증
             if not is_rag_result_relevant(result):
-                print(f"[RAG Service] 품질 미달 → 빈 결과 반환")
+                print("[RAG Service] 품질 미달 → 빈 결과 반환")
                 return {
                     "status": "success",
-                    "query": query,
-                    "count": 0,
-                    "data": [],
-                    "error": None
+                    "query":  query,
+                    "count":  0,
+                    "data":   [],
+                    "error":  None,
                 }
 
-            print(f"[RAG Service] 완료 → {len(processed_documents)}개 반환 (최고점: {max_score})")
+            print(f"[RAG Service] 완료 → {len(processed_documents)}개 반환 (최고 final_score: {max_score:.4f})")
             return result
 
         except Exception as e:
             print(f"[RAG Service 에러]: {str(e)}")
             return {
                 "status": "error",
-                "query": query,
-                "count": 0,
-                "data": [],
-                "error": f"RAG 파이프라인 장애: {str(e)}"
+                "query":  query,
+                "count":  0,
+                "data":   [],
+                "error":  f"RAG 파이프라인 장애: {str(e)}",
             }
 
     @staticmethod
@@ -175,9 +252,6 @@ class RAGService:
         filter: dict = None,
         question_type: str = "general",
     ) -> dict:
-        """
-        동기 래퍼 — rag_node에서 rag_service.retrieve_relevant_knowledge_sync()로 호출
-        """
         return RAGService.retrieve_relevant_knowledge(
             query=query,
             original_query=original_query,
