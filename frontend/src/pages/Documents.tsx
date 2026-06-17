@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Upload } from 'lucide-react'
 import { files } from '../data/documentsData'
 import DocumentTab from '../components/Documents/DocumentTab'
 import VoiceTab from '../components/Documents/VoiceTab'
@@ -30,13 +29,6 @@ export default function Documents({ selectedDocId, docViewMode, onBack }: Props)
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-5">
-        <h1 className="text-lg font-bold text-gray-800 dark:text-white">문서 보관함</h1>
-        <button className="flex items-center gap-1.5 text-xs text-white bg-blue-600 px-3 py-2 rounded-lg hover:bg-blue-700">
-          <Upload size={13} /> 업로드
-        </button>
-      </div>
-
       <div className="flex gap-1 mb-5 border-b border-gray-100 dark:border-gray-700">
         {tabs.map((tab, i) => (
           <button

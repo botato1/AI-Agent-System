@@ -22,8 +22,12 @@ export default function DocumentTab() {
   useEffect(() => {
     fetch(`${BASE_URL}/api/documents`)
       .then(r => r.json())
-      .then(data => {
-        setDocuments(data.documents ?? [])
+     .then(data => {
+        const docs = data.documents ?? []
+        const unique = docs.filter((doc: DocumentItem, index: number, self: DocumentItem[]) =>
+          index === self.findIndex(d => d.filename === doc.filename)
+        )
+        setDocuments(unique)
       })
       .catch(err => console.error('문서 목록 불러오기 실패:', err))
       .finally(() => setLoading(false))
