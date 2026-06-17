@@ -97,13 +97,36 @@ def init_db():
     )
     """)
 
-    # ── 마이그레이션 (기존 DB에 컬럼 없을 때 자동 추가) ──────────
+    # 7. document_chunks
+    # STT 발화(transcription) 단위 저장이 1차 목적이나,
+    # start_time/end_time/speaker가 NULL 허용이라
+    # 추후 일반 문서 chunk 저장에도 쓸 수 있는 공용 테이블.
+    # 주의: 이 chunk_index는 발화 순서 기준이며,
+    #       ChromaDB 검색용 chunk_index(의미 단위 그룹)와는 다른 단위.
+    # FK 문법은 유지하되 PRAGMA foreign_keys 강제는 보류
+    # (기존 테이블들과의 일관성은 전체 DB 정책 논의 시 같이 결정).
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS document_chunks (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        document_id  TEXT NOT NULL,
+        chunk_index  INTEGER NOT NULL,
+        content      TEXT NOT NULL,
+        start_time   REAL,
+        end_time     REAL,
+        speaker      TEXT,
+        content_type TEXT DEFAULT 'transcription',
+        user_edited  INTEGER DEFAULT 0,
+        created_at   TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (document_id) REFERENCES documents(id)
+    )
+    """)
+
+    # ── 마이그레이션 (기존 DB에 컬럼/테이블 없을 때 자동 추가) ────
     migrations = [
         "ALTER TABLE documents ADD COLUMN json_path TEXT DEFAULT ''",
         "ALTER TABLE documents ADD COLUMN content_markdown TEXT DEFAULT ''",
         "ALTER TABLE tasks ADD COLUMN priority TEXT DEFAULT 'medium'",
     ]
-
     for sql in migrations:
         try:
             cursor.execute(sql)
