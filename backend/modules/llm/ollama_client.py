@@ -75,9 +75,42 @@ def normalize_query(user_input: str) -> str:
     return response_text
 
 
+# ── 의도 분류 (5개 카테고리로 단순화) ──────────────────────────
+VALID_INTENTS = [
+    "task_from_rag",      # RAG 자료(회의록/문서) 기반 할일 추출
+    "task_from_memory",   # 채팅 기록 기반 할일 추출
+    "notion_save",        # RAG 자료를 찾아서 Notion에 저장
+    "knowledge_search",   # RAG 자료로 답변 생성 (에러해결/문서질문/회의검색 등)
+    "general_answer",     # RAG/memory 둘 다 불필요, 바로 답변
+]
+
+INTENT_CLASSIFICATION_PROMPT = """[INST] 다음 사용자 질문을 아래 5개 카테고리 중 정확히 하나로 분류하세요.
+
+카테고리:
+- task_from_rag: 회의록이나 업로드한 문서에서 할 일/액션아이템을 추출해달라는 요청
+  예: "회의록에서 할 일 추출해줘", "그 문서에서 담당자별 업무 정리해줘"
+
+- task_from_memory: 방금 나눈 대화나 채팅 기록에서 할 일을 추출해달라는 요청
+  예: "방금 대화에서 할 일 뽑아줘", "우리가 얘기한 내용에서 액션아이템 정리해줘"
+
+- notion_save: 회의록/문서/기술자료를 찾아서 Notion에 저장하거나 정리해달라는 요청
+  예: "저번 회의록 노션에 저장해줘", "이 내용 정리해서 노션에 적어줘"
+
+- knowledge_search: 회의록/업로드문서/기술지식에서 정보를 찾아 답변이 필요한 질문
+  예: "저번 회의에서 뭐라고 했지", "쿠버 에러 어떻게 해결해", "그 문서 차트 제목이 뭐였지", "이거 요약해줘"
+
+- general_answer: 위 카테고리에 해당하지 않는 일반 질문이나 용어 설명
+  예: "winmain이 뭐야", "안녕", "고마워"
+
+반드시 아래 JSON 형식으로만 답하세요. 다른 설명은 절대 쓰지 마세요.
+{{"intent": "카테고리명"}}
+
+질문: {user_input} [/INST]"""
+
+
 def classify_intent(user_input: str) -> dict:
-    """사용자 질문 의도 파악"""
-    prompt = f"[INST] [의도파악] {user_input} [/INST]"
+    """사용자 질문 의도 파악 (5개 카테고리)"""
+    prompt = INTENT_CLASSIFICATION_PROMPT.format(user_input=user_input)
 
     response = httpx.post(
         f"{OLLAMA_BASE_URL}/api/generate",
@@ -85,27 +118,17 @@ def classify_intent(user_input: str) -> dict:
         timeout=30.0
     )
     result = response.json()
-    response_text = result.get("response", "general").strip()
+    response_text = result.get("response", "general_answer").strip()
 
     try:
         parsed = json.loads(response_text)
-        intent = parsed.get("intent", "general").strip().lower()
+        intent = parsed.get("intent", "general_answer").strip().lower()
     except:
         intent = response_text.strip().lower()
 
-    valid_intents = [
-        "error_troubleshooting",
-        "past_record_search",
-        "document_summary",
-        "term_explanation",
-        "task_extraction",
-        "notion_save",
-        "memory_search",
-        "document_question",
-        "general"
-    ]
-    if intent not in valid_intents:
-        intent = "general"
+    if intent not in VALID_INTENTS:
+        print(f"[classify_intent] 알 수 없는 intent: '{intent}' → general_answer로 대체")
+        intent = "general_answer"
 
     return {"intent": intent, "original_input": user_input}
 
@@ -153,38 +176,21 @@ def generate_answer(user_input: str, context: str = "") -> str:
 # ── 흐름별 답변 생성 ──────────────────────────────────────────
 def generate_answer_for_graph(
     user_message: str,
-    question_type: str = "general",
+    question_type: str = "general_answer",
     rag_context: str = "",
     memory_context: str = "",
     tasks: list = None,
 ) -> str:
     """
     question_type에 따라 프롬프트 자동 구성 후 LLM 호출.
-    ollama_service.py에서 question_type만 넘겨주면 됨.
+    question_type 5개: task_from_rag, task_from_memory,
+                        notion_save, knowledge_search, general_answer
     """
     tasks = tasks or []
     rag_context = rag_context or ""
     memory_context = memory_context or ""
 
-    if question_type == "document_summary":
-        prompt = f"""
-{DOBY_SYSTEM_GUIDE}
-
-아래 참고 문서 내용만 사용해서 사용자가 요청한 문서를 요약해줘.
-
-[규칙]
-- 참고 문서에 없는 내용은 추측하지 마라.
-- 핵심 내용, 주요 근거, 결론 순서로 정리해라.
-- 맞춤법과 띄어쓰기를 자연스럽게 다듬어라.
-- 기술 용어는 일반적으로 쓰이는 표현을 사용해라.
-- 답변은 한국어로 작성해라.
-
-사용자 질문:
-{user_message}
-"""
-        return generate_answer(prompt, context=rag_context)
-
-    if question_type in ("document_question", "error_troubleshooting") and rag_context:
+    if question_type == "knowledge_search" and rag_context:
         prompt = f"""
 {DOBY_SYSTEM_GUIDE}
 
@@ -193,6 +199,7 @@ def generate_answer_for_graph(
 [규칙]
 - 참고 문서에 있는 내용만 근거로 답해라.
 - 참고 문서에 없는 내용은 모른다고 답해라.
+- 요약이 필요한 질문이면 핵심, 근거, 결론 순서로 정리해라.
 - 답변은 한국어로 작성해라.
 
 사용자 질문:
@@ -200,7 +207,7 @@ def generate_answer_for_graph(
 """
         return generate_answer(prompt, context=rag_context)
 
-    if question_type == "task_extract" and tasks:
+    if question_type in ("task_from_rag", "task_from_memory") and tasks:
         task_context = json.dumps(tasks, ensure_ascii=False, indent=2)
         prompt = f"""
 {DOBY_SYSTEM_GUIDE}
@@ -221,23 +228,23 @@ def generate_answer_for_graph(
 """
         return generate_answer(prompt, context=task_context)
 
-    if question_type == "memory_search" and memory_context:
+    if question_type == "notion_save" and rag_context:
         prompt = f"""
 {DOBY_SYSTEM_GUIDE}
 
-아래 이전 대화 기록을 참고해서 사용자 요청에 답해줘.
+아래 참고 문서 내용을 Notion에 저장할 형태로 정리해줘.
 
 [규칙]
-- 이전 대화 기록에 있는 내용만 근거로 답해라.
-- 이전 대화 기록에 없는 내용은 임의로 만들지 마라.
-- 답변은 한국어로 작성해라.
+- 참고 문서에 없는 내용은 추가하지 마라.
+- 핵심 내용만 간결하게 정리해라.
+- 한국어로 작성해라.
 
 사용자 질문:
 {user_message}
 """
-        return generate_answer(prompt, context=memory_context)
+        return generate_answer(prompt, context=rag_context)
 
-    # general 또는 fallback
+    # general_answer 또는 fallback
     prompt = f"""
 {DOBY_SYSTEM_GUIDE}
 
@@ -256,7 +263,7 @@ def generate_answer_for_graph(
 
 # ── 할 일 추출 ────────────────────────────────────────────────
 def extract_tasks_from_content(content: str) -> list[dict]:
-    """회의록/문서에서 담당자별 할 일 추출"""
+    """회의록/문서/채팅기록에서 담당자별 할 일 추출"""
     if not content or not content.strip():
         return []
 
@@ -398,20 +405,14 @@ if __name__ == "__main__":
     result = normalize_query("쿠버 파드 뻗었어")
     print(f"변환 결과: {result}")
 
-    print("\n=== 파일명 보존 테스트 ===")
-    result2 = normalize_query("무도_하지마_7장_보고서.pdf 요약해줘")
-    print(f"변환 결과: {result2}")
-
-    print("\n=== 의도 파악 테스트 ===")
-    intent = classify_intent("저번 쿠버 OOM 터진거 어떻게 해결했지")
-    print(f"의도: {intent}")
-
-    print("\n=== 화자분리 보완 테스트 ===")
-    test_segments = [
-        {"speaker": "SPEAKER_00", "start": 0.0,  "end": 3.2,  "text": "오늘 회의 시작할게요."},
-        {"speaker": "SPEAKER_01", "start": 3.5,  "end": 7.1,  "text": "네 준비됐습니다."},
-        {"speaker": "SPEAKER_00", "start": 7.3,  "end": 12.0, "text": "먼저 지난주 이슈 정리부터 하겠습니다."},
-        {"speaker": "SPEAKER_00", "start": 12.1, "end": 15.0, "text": "네 좋습니다."},
+    print("\n=== 의도 분류 테스트 (5개 카테고리) ===")
+    test_queries = [
+        "회의록에서 할 일 추출해줘",
+        "방금 대화에서 할 일 뽑아줘",
+        "저번 회의록 노션에 저장해줘",
+        "쿠버 파드 뻗었는데 어떻게 해결해",
+        "winmain이 뭐야",
     ]
-    enhanced = enhance_diarization(test_segments)
-    print(f"보완 결과: {enhanced}")
+    for q in test_queries:
+        result = classify_intent(q)
+        print(f"'{q}' → {result['intent']}")

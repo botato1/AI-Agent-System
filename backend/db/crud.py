@@ -314,6 +314,24 @@ def get_documents(conversation_id: str) -> list:
     return [dict(row) for row in rows]
 
 
+def get_document_by_id(document_id: str) -> dict | None:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT id, conversation_id, title, type, source, file_path, json_path,
+               content_markdown, summary, status, created_at
+        FROM documents
+        WHERE id = ?
+        LIMIT 1
+        """,
+        (document_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def get_all_documents() -> list:
     """전체 문서 목록 조회"""
     conn = get_connection()
