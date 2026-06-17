@@ -19,12 +19,13 @@ import TabRelated from '../components/DocumentAnalysis/TabRelated'
 const tabs = ['요약', '전체 문서', 'Task', '연관 문서']
 
 interface AnalysisProps {
-  onReview: () => void  //검토하기
-  onGoToChat?: () => void //채팅으로 이동
-  onBack?: () => void 
+  analysisData?: any
+  onReview: () => void
+  onGoToChat?: () => void
+  onBack?: () => void
 }
 
-export default function Analysis({ onReview, onGoToChat, onBack }: AnalysisProps) {
+export default function Analysis({ analysisData, onReview, onGoToChat, onBack }: AnalysisProps) {
   const { showToast } = useToast()
   const [activeTab, setActiveTab] = useState(0) //활성화 탭 기본은 요약 탭
 
@@ -79,8 +80,8 @@ export default function Analysis({ onReview, onGoToChat, onBack }: AnalysisProps
   //activeTab 인덱스에 따라 탭 컴포넌트 변경
 const renderTab = () => {
   switch (activeTab) {
-    case 0: return <TabSummary />
-    case 1: return <TabOriginal />
+    case 0: return <TabSummary analysisData={analysisData}/>
+    case 1: return <TabOriginal analysisData={analysisData}/>
     case 2: return <TabTasks />
     case 3: return <TabRelated />
     default: return <TabSummary />
@@ -96,10 +97,16 @@ const renderTab = () => {
           </button>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold text-gray-800 dark:text-white">마케팅 전략 회의</h1>
+              <h1 className="text-lg font-bold text-gray-800 dark:text-white">
+                {analysisData?.title ?? '마케팅 전략 회의'}
+              </h1>
               <span className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 px-2 py-0.5 rounded-full font-medium">분석 완료</span>
             </div>
-            <p className="text-xs text-gray-400 mt-0.5">2024.05.20 (월) 14:00 · 회의 시간 1hr 32m</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {analysisData?.created_at
+              ? new Date(analysisData.created_at).toLocaleDateString('ko-KR')
+              : '2024.05.20 (월) 14:00'}
+            </p>
           </div>
         </div>
         <div className="flex gap-2">
