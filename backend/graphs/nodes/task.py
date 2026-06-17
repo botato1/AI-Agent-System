@@ -2,7 +2,7 @@ from backend.schemas.agent_schema import AgentState
 from backend.services.ollama_service import ollama_service
 
 
-# LangGraph에서 회의록/문서 기반 할 일 추출을 담당하는 노드
+# LangGraph에서 문서 또는 대화 기반 할 일 추출을 담당하는 노드
 def task_node(state: AgentState) -> AgentState:
     # 할 일 추출이 필요 없으면 task_node 실행 건너뜀
     if not state.get("need_task_extract", False):
@@ -21,7 +21,7 @@ def task_node(state: AgentState) -> AgentState:
     if document_json.get("content"):
         source_content = document_json.get("content")
 
-    # RAG 검색 결과가 있으면 RAG context 사용
+    # 문서 context가 있으면 사용
     elif rag_context.strip():
         source_content = rag_context
 

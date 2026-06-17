@@ -73,7 +73,7 @@ def create_initial_state(request: ChatRequest) -> AgentState:
         "rag_filter": rag_filter,
 
         # 4. 질문 유형 판단 결과
-        "question_type": "general",
+        "question_type": "general_answer",
         "need_general_answer": True,
         "need_memory": False,
         "need_rag": False,
@@ -220,6 +220,35 @@ def normalize_task_priority(priority: str | None) -> str:
     return priority_map.get(priority, "medium")
 
 
+def normalize_assignee_name(assignee: str | None) -> str | None:
+    """
+    LLM이 한국어 조사까지 담당자 이름으로 추출한 경우 보정한다.
+
+    예:
+    나연이 -> 나연
+    승현이 -> 승현
+    """
+    if not assignee:
+        return None
+
+    assignee = str(assignee).strip()
+
+    if not assignee:
+        return None
+
+    # 여러 명이 문자열로 들어오는 경우는 그대로 둔다.
+    # 예: "나연, 지수", "나연/지수", "나연 지수"
+    if "," in assignee or "/" in assignee or " " in assignee:
+        return assignee
+
+    # "나연이", "승현이"처럼 이름 뒤에 붙은 '이'를 제거
+    # 너무 짧은 이름은 건드리지 않음
+    if assignee.endswith("이") and len(assignee) >= 3:
+        assignee = assignee[:-1]
+
+    return assignee
+
+
 def normalize_tasks(tasks: list | None) -> list[dict]:
     """
     LLM 또는 task_extract_node에서 나온 tasks를
@@ -246,7 +275,7 @@ def normalize_tasks(tasks: list | None) -> list[dict]:
                 or task.get("title")
                 or task.get("content")
                 or "",
-            "assignee": task.get("assignee"),
+            "assignee": normalize_assignee_name(task.get("assignee")),
             "deadline": task.get("deadline")
                 or task.get("due_date")
                 or task.get("due"),
