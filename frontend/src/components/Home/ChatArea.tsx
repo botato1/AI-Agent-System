@@ -11,10 +11,20 @@ const suggestions = [
   '중요한 내용 알려줘',
 ]
 
+interface ChatTask {
+  task_id: string
+  task: string
+  assignee: string | null
+  deadline: string | null
+  status: string
+  priority?: string
+}
+
 interface Message {
   id: string
   role: 'user' | 'assistant'
   text: string
+  tasks?: ChatTask[]
 }
 
 interface Props {
@@ -25,12 +35,55 @@ interface Props {
   onGoToAnalysis?: () => void
 }
 
+const TASKS_KEY = 'chatTasks'     //채팅방별 업무 목록 저장 키
+const ADDED_KEY = 'addedTaskIds'  //이미 추가한 업무 ID 집합 저장 키
+
+// 채팅방의 업무 목록을 localStorage에 저장 (중복 방지 포함)
+const saveRoomTasks = (roomId: string, tasks: ChatTask[]) => {
+  try {
+    const all = JSON.parse(localStorage.getItem(TASKS_KEY) ?? '{}')
+    const existing: ChatTask[] = all[roomId] ?? [] //localStorage에 이미 있던 업무 목록 꺼내오기
+    const merged = [...existing]                   
+    //task_id 기준 중복 없는 것만 추가
+    tasks.forEach(t => {
+      if (!merged.find(e => e.task_id === t.task_id)) merged.push(t) //existing을 복사한 배열에서 시작해서, 새로 온 tasks 중 tasks_id가 안겹피는 것만 뒤에 추가
+    })
+    all[roomId] = merged
+    localStorage.setItem(TASKS_KEY, JSON.stringify(all))
+  } catch {}
+}
+
+//localStorage에서 특정 채팅방의 업무 목록 불러오기
+const loadRoomTasks = (roomId: string): ChatTask[] => {
+  try {
+    const all = JSON.parse(localStorage.getItem(TASKS_KEY) ?? '{}')
+    return all[roomId] ?? []
+  } catch { return [] }
+}
+
+//"업무 추가" 버튼을 누른 task_id 집합을 localStorage에 저장
+const saveAddedIds = (ids: Set<string>) => {
+  try {
+    localStorage.setItem(ADDED_KEY, JSON.stringify([...ids]))
+  } catch {}
+}
+
+//localStorage에서 추가된 task_id 집합 불러오기
+const loadAddedIds = (): Set<string> => {
+  try {
+    const saved = localStorage.getItem(ADDED_KEY)
+    return saved ? new Set(JSON.parse(saved)) : new Set()
+  } catch { return new Set() }
+}
+
 export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated, targetFilename, onGoToAnalysis }: Props) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [addedTaskIds, setAddedTaskIds] = useState<Set<string>>(loadAddedIds)
   const bottomRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const loadingRef = useRef(false)  // loading 최신값 ref로 추적
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -41,15 +94,26 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
       setMessages([])
       return
     }
+    // 채팅 전송 중일 때는 메시지 초기화 안 함
+    if (loadingRef.current) return
+
     fetch(`${BASE_URL}/api/conversations/${activeRoomId}/messages`)
       .then(r => r.json())
       .then(data => {
-        const loaded = (data.messages ?? []).map((m: any) => ({
+        const msgs: Message[] = (data.messages ?? []).map((m: any) => ({
           id: m.message_id,
           role: m.role as 'user' | 'assistant',
           text: m.content,
         }))
-        setMessages(loaded)
+        const roomTasks = loadRoomTasks(activeRoomId)
+        if (roomTasks.length > 0) {
+          const lastAssistantIdx = [...msgs].reverse().findIndex(m => m.role === 'assistant')
+          if (lastAssistantIdx !== -1) {
+            const realIdx = msgs.length - 1 - lastAssistantIdx
+            msgs[realIdx].tasks = roomTasks
+          }
+        }
+        setMessages(msgs)
       })
       .catch(err => console.error('기록 불러오기 실패:', err))
   }, [activeRoomId])
@@ -65,12 +129,56 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
     return data.room_id
   }
 
+  const handleAddTask = async (task: ChatTask) => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          task: task.task,
+          assignee: task.assignee ?? null,
+          deadline: task.deadline ?? null,
+          status: 'todo',
+          priority: task.priority ?? 'medium',
+          room_id: activeRoomId,
+          document_id: null,
+        }),
+      })
+      if (!res.ok) throw new Error()
+      const data = await res.json()
+      if (!data.error) {
+        setAddedTaskIds(prev => {
+          const next = new Set(prev).add(task.task_id)
+          saveAddedIds(next)
+          return next
+        })
+      }
+    } catch {}
+  }
+
   const handleSend = async (overrideText?: string) => {
     const userText = (overrideText ?? input).trim()
     if (!userText || loading) return
 
     setInput('')
     setLoading(true)
+    loadingRef.current = true  // ref도 같이 업데이트
+
+    // roomId 먼저 확보
+    let roomId = activeRoomId
+    if (!roomId) {
+      try {
+        roomId = await createRoom(userText)
+        setActiveRoomId(roomId)  // 이 시점에 useEffect 트리거되지만 loadingRef.current=true라 초기화 안 됨
+        onRoomCreated()
+      } catch {
+        setLoading(false)
+        loadingRef.current = false
+        return
+      }
+    }
+
+    // roomId 확보 후 메시지 추가
     const loadingMsgId = `loading_${Date.now()}`
     setMessages(prev => [
       ...prev,
@@ -79,13 +187,6 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
     ])
 
     try {
-      let roomId = activeRoomId
-      if (!roomId) {
-        roomId = await createRoom(userText)
-        setActiveRoomId(roomId)
-        onRoomCreated()
-      }
-
       abortControllerRef.current = new AbortController()
 
       const res = await fetch(`${BASE_URL}/api/chat`, {
@@ -102,15 +203,19 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
       if (!res.ok) throw new Error(`HTTP error: ${res.status}`)
       const data = await res.json()
       const answerText = data.answer ?? data.error ?? '응답을 받지 못했어요.'
+      const tasks = Array.isArray(data.tasks) && data.tasks.length > 0 ? data.tasks : undefined
+
+      if (tasks && roomId) saveRoomTasks(roomId, tasks)
 
       setMessages(prev =>
-        prev.map(m => m.id === loadingMsgId ? { ...m, text: answerText } : m)
+        prev.map(m =>
+          m.id === loadingMsgId ? { ...m, text: answerText, tasks } : m
+        )
       )
     } catch (err: any) {
       if (err.name === 'AbortError') {
         setMessages(prev => prev.filter(m => m.id !== loadingMsgId))
       } else {
-        console.error('API 오류:', err)
         setMessages(prev =>
           prev.map(m =>
             m.id === loadingMsgId
@@ -121,6 +226,7 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
       }
     } finally {
       setLoading(false)
+      loadingRef.current = false  // ref 초기화
       onRoomCreated()
     }
   }
@@ -130,7 +236,6 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
   return (
     <div className="flex-1 flex flex-col">
 
-      {/* 분석 결과 보기 버튼 */}
       {targetFilename && (
         <div className="mb-3">
           <button
@@ -145,7 +250,6 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
         </div>
       )}
 
-      {/* 채팅 시작 전 */}
       {!started && (
         <div className="flex-1 flex flex-col items-center justify-center gap-6">
           <div className="text-center">
@@ -170,12 +274,11 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
         </div>
       )}
 
-      {/* 채팅 시작 후 메시지 영역 */}
       {started && (
         <div className="flex-1 overflow-y-auto flex flex-col gap-4 mb-4 pr-1">
           {messages.map((msg) => (
             <div key={msg.id} className={`group flex gap-3 items-start ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-              {/* 아바타 */}
+
               <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${
                 msg.role === 'assistant' ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600'
               }`}>
@@ -186,23 +289,55 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
                 </span>
               </div>
 
-              {/* 말풍선 */}
-              <div className={`max-w-lg px-4 py-3 rounded-2xl text-sm leading-relaxed ${
-                msg.role === 'assistant'
-                  ? 'bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-200'
-                  : 'bg-blue-600 text-white'
-              }`}>
-                {msg.text === '...' && loading
-                  ? <span className="animate-pulse text-gray-400">응답 생성 중...</span>
-                  : msg.role === 'user'
-                    ? msg.text
-                    : <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-0.5 prose-li:my-0 prose-ul:my-1 prose-ol:my-1 [&_*]:text-gray-700 dark:[&_*]:text-gray-200">
-                        <ReactMarkdown>{msg.text}</ReactMarkdown>
-                      </div>
-                }
+              <div className="flex flex-col gap-2 max-w-lg">
+                <div className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+                  msg.role === 'assistant'
+                    ? 'bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-200'
+                    : 'bg-blue-600 text-white'
+                }`}>
+                  {msg.text === '...' && loading
+                    ? <span className="animate-pulse text-gray-400">응답 생성 중...</span>
+                    : msg.role === 'user'
+                      ? msg.text
+                      : <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-0.5 prose-li:my-0 prose-ul:my-1 prose-ol:my-1 [&_*]:text-gray-700 dark:[&_*]:text-gray-200">
+                          <ReactMarkdown>{msg.text}</ReactMarkdown>
+                        </div>
+                  }
+                </div>
+
+                {msg.role === 'assistant' && msg.tasks && msg.tasks.length > 0 && (
+                  <div className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl p-3 flex flex-col gap-2">
+                    <p className="text-[10px] text-gray-400 dark:text-gray-500 font-medium">업무에 추가할 항목을 선택하세요</p>
+                    {msg.tasks.map((task) => {
+                      const isAdded = addedTaskIds.has(task.task_id)
+                      return (
+                        <div key={task.task_id} className="flex items-center justify-between gap-2 py-1.5 border-b border-gray-50 dark:border-gray-700 last:border-0">
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-xs text-gray-700 dark:text-gray-200">{task.task}</span>
+                            <span className="text-[10px] text-gray-400">
+                              {task.assignee && `${task.assignee}`}
+                              {task.assignee && task.deadline && ' · '}
+                              {task.deadline && `${task.deadline}`}
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => handleAddTask(task)}
+                            disabled={isAdded}
+                            className={`flex-shrink-0 text-[10px] px-3 py-1 rounded-full border transition ${
+                              isAdded
+                                ? 'border-green-300 text-green-500 dark:border-green-700 dark:text-green-400'
+                                : 'border-blue-300 text-blue-500 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-900/20'
+                            }`}
+                          >
+                            {isAdded ? '✓ 추가됨' : '+ 추가'}
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
 
-              {/* 삭제 버튼 */}
               <button
                 onClick={async () => {
                   if (!confirm('이 메시지를 삭제할까요?')) return
@@ -227,7 +362,6 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
         </div>
       )}
 
-      {/* 채팅 중 빠른 제안 */}
       {started && (
         <div className="flex gap-2 mb-3 flex-wrap">
           {suggestions.map((s, i) => (
@@ -242,7 +376,6 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
         </div>
       )}
 
-      {/* 입력창 */}
       <div className="flex gap-2 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-2xl p-2 shadow-sm">
         <textarea
           value={input}
