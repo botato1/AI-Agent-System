@@ -11,32 +11,39 @@ from backend.graphs.nodes.notion import notion_node
 
 
 def route_after_classifier(state: AgentState) -> str:
-    if state.get("need_memory", False):
+    question_type = state.get("question_type", "general_answer")
+
+    if question_type == "task_from_memory":
         return "memory"
-    if state.get("need_rag", False):
+
+    if question_type in {"task_from_RAG", "notion_save", "knowledge_search"}:
         return "rag"
-    if state.get("need_task_extract", False):
-        return "task"
+
     return "answer"
 
 
 def route_after_memory(state: AgentState) -> str:
-    if state.get("need_rag", False):
-        return "rag"
-    if state.get("need_task_extract", False):
+    question_type = state.get("question_type", "general_answer")
+
+    if question_type == "task_from_memory":
         return "task"
+
     return "answer"
 
 
 def route_after_rag(state: AgentState) -> str:
-    if state.get("need_task_extract", False):
+    question_type = state.get("question_type", "general_answer")
+
+    if question_type == "task_from_RAG":
         return "task"
+
+    if question_type == "notion_save":
+        return "notion"
+
     return "answer"
 
 
 def route_after_answer(state: AgentState) -> str:
-    if state.get("need_notion_save", False):
-        return "notion"
     return "end"
 
 
@@ -54,50 +61,48 @@ def build_agent_graph():
     # 2. 시작
     graph.add_edge(START, "classifier")
 
-    # 3. classifier 이후 필요한 첫 노드로 이동
+    # 3. classifier 이후 question_type 기준으로 첫 노드 이동
     graph.add_conditional_edges(
         "classifier",
         route_after_classifier,
         {
             "memory": "memory",
             "rag": "rag",
-            "task": "task",
             "answer": "answer",
-        }
+        },
     )
 
-    # 4. memory 이후 다음 필요 노드로 이동
+    # 4. memory 이후 task 또는 answer 이동
     graph.add_conditional_edges(
         "memory",
         route_after_memory,
         {
-            "rag": "rag",
             "task": "task",
             "answer": "answer",
-        }
+        },
     )
 
-    # 5. rag 이후 task 필요 여부 판단
+    # 5. rag 이후 question_type 기준으로 후처리 노드 이동
     graph.add_conditional_edges(
         "rag",
         route_after_rag,
         {
             "task": "task",
+            "notion": "notion",
             "answer": "answer",
-        }
+        },
     )
 
     # 6. task 이후 answer
     graph.add_edge("task", "answer")
 
-    # 7. answer 이후 notion 필요 여부 판단
+    # 7. answer 이후 종료
     graph.add_conditional_edges(
         "answer",
         route_after_answer,
         {
-            "notion": "notion",
             "end": END,
-        }
+        },
     )
 
     # 8. notion 이후 종료

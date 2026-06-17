@@ -131,6 +131,7 @@ def notion_node(state: AgentState) -> AgentState:
         title = (
             requested_title
             or document_json.get("title")
+            or state.get("target_filename")
             or "AI Agent 저장 결과"
         )
 
@@ -143,6 +144,8 @@ def notion_node(state: AgentState) -> AgentState:
             content = save_target_content
         elif state.get("need_memory") and memory_context:
             content = memory_context
+        elif rag_context:
+            content = rag_context
         elif document_json.get("content"):
             content = document_json.get("content")
         elif final_answer and final_answer != "Notion 저장 요청을 확인했습니다. 저장을 진행하겠습니다.":
