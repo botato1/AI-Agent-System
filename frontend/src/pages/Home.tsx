@@ -15,8 +15,8 @@ export default function Home({ onRoomCreated, activeRoomId, setActiveRoomId, tar
     <div className="flex flex-col h-[calc(100vh-48px)]">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h1 className="text-xl font-bold text-gray-800 dark:text-white">안녕하세요, 김나연님! 👋</h1>
-          <p className="text-sm text-gray-400 mt-1">Agentra가 오늘도 당신의 업무를 스마트하게 도와드릴게요.</p>
+          <h1 className="text-xl font-bold text-gray-800 dark:text-white">안녕하세요</h1>
+          <p className="text-sm text-gray-400 mt-1">오늘도 당신의 업무를 스마트하게 도와드릴게요.</p>
         </div>
         <button
           onClick={() => setActiveRoomId(null)}
