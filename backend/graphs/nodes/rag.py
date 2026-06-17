@@ -17,8 +17,9 @@ def rag_node(state: AgentState) -> AgentState:
     user_message = state.get("user_message", "")
     target_document_id = state.get("target_document_id")
     target_filename = state.get("target_filename")
-    question_type = state.get("question_type", "general")
+    question_type = state.get("question_type", "general_answer")
 
+    # 디버그용 print : 서버 안정화 후 삭제 예정
     print(f"[rag_node] user_message: {user_message}")
     print(f"[rag_node] question_type: {question_type}")
     print(f"[rag_node] target_document_id: {target_document_id}")
