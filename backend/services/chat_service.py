@@ -220,14 +220,8 @@ def normalize_task_priority(priority: str | None) -> str:
     return priority_map.get(priority, "medium")
 
 
+# LLM이 한국어 조사까지 담당자 이름으로 추출한 경우 보정한다.
 def normalize_assignee_name(assignee: str | None) -> str | None:
-    """
-    LLM이 한국어 조사까지 담당자 이름으로 추출한 경우 보정한다.
-
-    예:
-    나연이 -> 나연
-    승현이 -> 승현
-    """
     if not assignee:
         return None
 
@@ -237,11 +231,10 @@ def normalize_assignee_name(assignee: str | None) -> str | None:
         return None
 
     # 여러 명이 문자열로 들어오는 경우는 그대로 둔다.
-    # 예: "나연, 지수", "나연/지수", "나연 지수"
     if "," in assignee or "/" in assignee or " " in assignee:
         return assignee
 
-    # "나연이", "승현이"처럼 이름 뒤에 붙은 '이'를 제거
+    # 이름 뒤에 붙은 '이'를 제거
     # 너무 짧은 이름은 건드리지 않음
     if assignee.endswith("이") and len(assignee) >= 3:
         assignee = assignee[:-1]
