@@ -19,7 +19,7 @@ interface PipelineProps {
   reviewFileName: string | null
   onClearReview: () => void
   onRoomCreated?: () => void
-  onFileUploaded?: (filename: string) => void
+  onFileUploaded?: (filename: string, analysisData?: any) => void
   onRoomIdCreated?: (roomId: string) => void
 }
 
@@ -38,77 +38,69 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
   }
 
   const startPipeline = async (selectedFile: File) => {
-    setFile(selectedFile.name)
-    setStatuses(Array(6).fill('wait'))
-    setLogs([])
-    setUploadError(null)
-    setIsRunning(true)
+  setFile(selectedFile.name)
+  setStatuses(Array(6).fill('wait'))
+  setLogs([])
+  setUploadError(null)
+  setIsRunning(true)
 
-    addLog('채팅방 생성 중...')
-    try {
-      // 1. 채팅방 생성
-      const roomRes = await fetch(`${BASE_URL}/api/conversations`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: selectedFile.name }),
-      })
-      if (!roomRes.ok) throw new Error('채팅방 생성 실패')
-      const roomData = await roomRes.json()
-      const roomId = roomData.room_id
-      addLog(`채팅방 생성 완료 (${roomId})`)
-      onRoomIdCreated?.(roomId)
+  addLog('채팅방 생성 중...')
+  try {
+    // 1. 채팅방 생성
+    const roomRes = await fetch(`${BASE_URL}/api/conversations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: selectedFile.name }),
+    })
+    if (!roomRes.ok) throw new Error('채팅방 생성 실패')
+    const roomData = await roomRes.json()
+    const roomId = roomData.room_id
+    addLog(`채팅방 생성 완료 (${roomId})`)
+    onRoomIdCreated?.(roomId)
 
-      // 2. 문서 처리 (8003)
-      addLog('문서 업로드 중...')
-      const formData = new FormData()
-      formData.append('file', selectedFile)
+    // 2. 문서 업로드 (8000만 호출 — 8003 연동은 서버가 알아서 함)
+    addLog('문서 업로드 중...')
+    const formData = new FormData()
+    formData.append('file', selectedFile)
+    formData.append('room_id', roomId)
+    formData.append('type', 'document')
 
-      const uploadRes = await fetch('http://220.90.180.93:8003/api/document', {
-        method: 'POST',
-        body: formData,
-      })
-      if (!uploadRes.ok) throw new Error('문서 업로드 실패')
-      const uploadData = await uploadRes.json()
-      console.log('업로드 응답:', uploadData)
-      addLog(`문서 처리 완료: ${uploadData.filename}`)
+    const uploadRes = await fetch(`${BASE_URL}/api/documents/upload`, {
+      method: 'POST',
+      body: formData,
+    })
+    if (!uploadRes.ok) throw new Error('문서 업로드 실패')
+    const uploadData = await uploadRes.json()
+    if (uploadData.status === 'error') throw new Error(uploadData.error ?? '문서 처리 실패')
 
-      // 3. 메타데이터 저장 (8000)
-      // 3. 메타데이터 저장 (8000)
-addLog('메타데이터 저장 중...')
-const metaRes = await fetch(`${BASE_URL}/api/documents/metadata`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    document_id: uploadData.document_id,
-    room_id: roomId,
-    filename: uploadData.filename,
-  }),
-})
-console.log('메타데이터 응답 상태:', metaRes.status)  // ← 추가
-const metaData = await metaRes.json()
-console.log('메타데이터 응답:', metaData)  // ← 추가
-if (!metaRes.ok) throw new Error('메타데이터 저장 실패')
-addLog('메타데이터 저장 완료 ✓')
+    console.log('업로드 응답:', uploadData)
+    addLog(`문서 처리 완료: ${uploadData.filename}`)
+    addLog('메타데이터 저장 완료 ✓')
 
-      onFileUploaded?.(uploadData.filename)
+    onFileUploaded?.(uploadData.filename, uploadData)
+    setTimeout(() => onRoomCreated?.(), 1000)
 
-      // 사이드바 갱신
-      setTimeout(() => onRoomCreated?.(), 1000)
+    // 3. 파이프라인 시작
+    setCurrentStep(0)
 
-      // 4. 파이프라인 시작
-      setCurrentStep(0)
-
-    } catch (err: any) {
-      console.error('업로드 오류:', err)
-      setUploadError(err.message)
-      addLog(`오류: ${err.message}`)
-      setIsRunning(false)
-    }
+  } catch (err: any) {
+    console.error('업로드 오류:', err)
+    setUploadError(err.message)
+    addLog(`오류: ${err.message}`)
+    setIsRunning(false)
   }
+}
 
   useEffect(() => {
     if (currentStep < 0 || currentStep >= 6) {
-      if (currentStep === 6) setIsRunning(false)
+      if (currentStep === 6) {
+        setIsRunning(false)
+      if (Notification.permission === 'granted'){
+        new Notification('문서 분석 완료',{
+          body : `${file} 분석이 완료됐어요!`,
+        })
+      }
+    }
       return
     }
     setStatuses(prev => {
@@ -244,14 +236,14 @@ addLog('메타데이터 저장 완료 ✓')
           )}
 
           <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-600 p-4">
-            <h3 className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">초기 분석 프롬프트</h3>
+            <h3 className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">분석 요청사항</h3>
             <p className="text-xs text-gray-400 dark:text-gray-500 mb-3">
-              AI가 분석 시 참고할 맥락이나 요청 사항을 입력하세요
+              AI가 분석 시 참고할 내용을 입력해주세요
             </p>
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="예) 이 문서에서 핵심 액션 아이템과 담당자를 중심으로 요약해줘. 일정 관련 내용을 특히 강조해줘."
+              placeholder="예) 할 일과 담당자 위주로 정리해줘"
               className="w-full resize-none text-sm bg-gray-100 dark:bg-[#161616] border border-gray-200 dark:border-gray-700 rounded-lg p-3 text-gray-700 dark:text-gray-300 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-400 min-h-[100px]"
             />
             <div className="flex justify-end gap-2 mt-3">
