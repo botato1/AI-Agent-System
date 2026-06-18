@@ -19,7 +19,7 @@ export default function DocumentList({ nodes, selected, onSelect, getGroupColor 
           전체 문서 ({nodes.length})
         </h3>
       </div>
-      <div className="overflow-y-auto flex-1 p-2">
+      <div className="overflow-y-auto flex-1 p-2 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-600 [&::-webkit-scrollbar-track]:bg-transparent">
         <div className="flex flex-col gap-0.5">
           {nodes.map((node, i) => (
             <div

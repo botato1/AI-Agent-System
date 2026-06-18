@@ -44,6 +44,13 @@ export default function GraphCanvas({ nodes, links, isDark, getGroupColor, onSel
     svg.call(zoom)
     zoomRef.current = zoom //외부에서 줌 인/아웃 버튼으로 제어
 
+    // svg 클릭 시 선택 해제 (노드 클릭은 별도 처리)
+    svg.on('click', (event) => {
+      if (event.target === svgRef.current) {
+        onSelect('')
+      }
+    })
+
       //노드들이 퍼지도록 힘 기반 레이아웃 적용
     const simulation = d3.forceSimulation(nodes as any)
       .force('link', d3.forceLink(links as any).id((d: any) => d.id).distance(25))
