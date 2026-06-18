@@ -8,7 +8,22 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import UploadFile
 
-from backend.db.crud import ensure_conversation, save_document_metadata, save_document_chunks, delete_document_chunks, get_document_by_id, get_document_chunks, get_all_voice_documents,delete_document
+from backend.db.crud import (
+    ensure_conversation,
+    save_document_metadata,
+    save_document_chunks,
+    delete_document_chunks,
+    get_document_by_id,
+    get_document_chunks,
+    get_all_voice_documents,
+    delete_document,
+)
+
+
+# room_id 없이 업로드된 음성을 documents.conversation_id에 저장할 내부 값
+# conversations 테이블에는 생성하지 않음
+VOICE_LIBRARY_ROOM_ID = "__voice_library__"
+
 
 # 8001 STT 서버 URL
 STT_BASE_URL = os.getenv(
@@ -21,6 +36,7 @@ STT_PROCESS_URL = os.getenv(
     f"{STT_BASE_URL}/api/stt"
 )
 
+
 # 허용할 음성 확장자
 ALLOWED_STT_EXTENSIONS = {
     ".mp3",
@@ -28,6 +44,7 @@ ALLOWED_STT_EXTENSIONS = {
     ".m4a",
     ".webm",
 }
+
 
 def is_allowed_stt_file(file: UploadFile) -> bool:
     filename = file.filename or ""
@@ -42,8 +59,11 @@ def is_allowed_stt_file(file: UploadFile) -> bool:
     return False
 
 
-# 초 단위 시간을 문자열로 변환. 값이 없으면 ?로 표기
 def _format_time(value) -> str:
+    """
+    초 단위 시간을 문자열로 변환한다.
+    값이 없으면 ?로 표시한다.
+    """
     if value is None:
         return "?"
 
@@ -53,8 +73,10 @@ def _format_time(value) -> str:
         return str(value)
 
 
-# documents.metadata에 저장된 JSON 문자열을 dict로 변환한다.
 def _safe_json_loads(value) -> dict:
+    """
+    documents.metadata에 저장된 JSON 문자열을 dict로 변환한다.
+    """
     if not value:
         return {}
 
@@ -67,8 +89,11 @@ def _safe_json_loads(value) -> dict:
         return {}
 
 
-# STT 결과의 content와 transcription을 기반으로 LLM/RAG에서 사용할 content_markdown 생성
 def _build_stt_content_markdown(data: dict) -> str:
+    """
+    STT 결과의 content와 transcription을 기반으로
+    LLM/RAG에서 사용할 content_markdown을 만든다.
+    """
     metadata = data.get("metadata") or {}
 
     title = (
@@ -128,8 +153,12 @@ def _get_stt_file_path(data: dict) -> str:
         or ""
     )
 
-# STT metadata에서 duration 가져옴
+
 def _get_duration_sec(metadata: dict) -> float | None:
+    """
+    STT metadata에서 duration 값을 가져온다.
+    STT 서버 응답 키가 duration_sec 또는 duration 등으로 올 수 있어서 안전하게 처리한다.
+    """
     if not metadata:
         return None
 
@@ -148,9 +177,11 @@ def _get_duration_sec(metadata: dict) -> float | None:
         return None
 
 
-# 상세 조회 응답의 content 필드용 전체 전사 텍스트를 만든다
 def _extract_plain_content_from_markdown(content_markdown: str) -> str:
-
+    """
+    상세 조회 응답의 content 필드용 전체 전사 텍스트를 만든다.
+    우선 content_markdown에서 '전체 전사 내용' 부분을 최대한 추출한다.
+    """
     if not content_markdown:
         return ""
 
@@ -167,8 +198,11 @@ def _extract_plain_content_from_markdown(content_markdown: str) -> str:
 
     return content_part.strip()
 
-# document_chunks 조회 결과를 프론트가 쓰는 transcription 형식으로 변환
+
 def _chunks_to_transcription(chunks: list[dict]) -> list[dict]:
+    """
+    document_chunks 조회 결과를 프론트가 쓰는 transcription 형식으로 변환한다.
+    """
     transcription = []
 
     for chunk in chunks:
@@ -184,8 +218,15 @@ def _chunks_to_transcription(chunks: list[dict]) -> list[dict]:
 
     return transcription
 
-# 8001 삭제 API에서 사용하는 file_id를 original_file_url에서 추출
+
 def _extract_file_id_from_original_file_url(original_file_url: str | None) -> str | None:
+    """
+    8001 삭제 API에서 사용하는 file_id를 original_file_url에서 추출한다.
+
+    예:
+    http://localhost:8001/uploads/audio_3b686ce18a994bc8a3b00d71ff5f4727.wav
+    -> audio_3b686ce18a994bc8a3b00d71ff5f4727
+    """
     if not original_file_url:
         return None
 
@@ -201,8 +242,16 @@ def _extract_file_id_from_original_file_url(original_file_url: str | None) -> st
     except Exception:
         return None
 
-# 8001 DELETE /api/stt/{file_id} 호출에 사용할 file_id를 결정
+
 def _resolve_stt_file_id(document_id: str, metadata: dict) -> str:
+    """
+    8001 DELETE /api/stt/{file_id} 호출에 사용할 file_id를 결정한다.
+
+    우선순위:
+    1. metadata.original_file_url에서 추출한 audio_xxx
+    2. metadata.file_id
+    3. document_id
+    """
     metadata = metadata or {}
 
     original_file_url = metadata.get("original_file_url")
@@ -215,7 +264,24 @@ def _resolve_stt_file_id(document_id: str, metadata: dict) -> str:
     )
 
 
-def _build_success_response(room_id: str, document_id: str, filename: str, title: str, file_path: str, summary: str, saved_chunk_count: int, transcription: list, metadata: dict,) -> dict:
+def _is_voice_library_room_id(conversation_id: str | None) -> bool:
+    """
+    room_id 없이 업로드된 독립 음성인지 확인한다.
+    """
+    return conversation_id == VOICE_LIBRARY_ROOM_ID
+
+
+def _build_success_response(
+    room_id: str | None,
+    document_id: str,
+    filename: str,
+    title: str,
+    file_path: str,
+    summary: str,
+    saved_chunk_count: int,
+    transcription: list,
+    metadata: dict,
+) -> dict:
     duration_sec = _get_duration_sec(metadata)
     file_id = _resolve_stt_file_id(document_id, metadata)
 
@@ -242,7 +308,12 @@ def _build_success_response(room_id: str, document_id: str, filename: str, title
     }
 
 
-def _build_error_response(room_id: str, filename: str, message: str, error: str,) -> dict:
+def _build_error_response(
+    room_id: str | None,
+    filename: str,
+    message: str,
+    error: str,
+) -> dict:
     return {
         "status": "error",
         "room_id": room_id,
@@ -262,9 +333,38 @@ def _build_error_response(room_id: str, filename: str, message: str, error: str,
         "error": error,
     }
 
-# STT 업로드 통합 처리 함수
-async def upload_and_process_stt(file: UploadFile, room_id: str,) -> dict:
+
+async def upload_and_process_stt(
+    file: UploadFile,
+    room_id: str | None = None,
+) -> dict:
+    """
+    STT 업로드 통합 처리 함수.
+
+    흐름:
+    1. 프론트에서 받은 음성 파일 검증
+    2. 8001 STT 서버로 파일 전달
+    3. 8001 응답 data 파싱
+    4. documents 테이블 저장
+    5. document_chunks 테이블 저장
+    6. 프론트에 document_id, file_id, transcription, metadata 반환
+
+    room_id가 있는 경우:
+    - 해당 채팅방과 연결
+    - conversations 생성/갱신
+    - 최근 채팅 목록에 표시될 수 있음
+
+    room_id가 없는 경우:
+    - conversations 생성/갱신 안 함
+    - documents.conversation_id에는 내부 값 "__voice_library__" 저장
+    - 최근 채팅 목록에 표시되지 않음
+    - 음성 목록 GET /api/stt/list에는 표시됨
+    """
     filename = Path(file.filename).name if file and file.filename else "uploaded_audio"
+
+    # documents.conversation_id는 NOT NULL이므로 내부 저장용 ID가 필요하다.
+    # 단, 이 값으로 conversations를 만들지는 않는다.
+    db_room_id = room_id or VOICE_LIBRARY_ROOM_ID
 
     try:
         # 1. 파일 형식 검증
@@ -329,6 +429,10 @@ async def upload_and_process_stt(file: UploadFile, room_id: str,) -> dict:
         transcription = data.get("transcription") or []
         metadata = data.get("metadata") or {}
 
+        # STT 서버가 data.language로 언어를 내려주는 경우 metadata에도 보존
+        if data.get("language") and not metadata.get("language"):
+            metadata["language"] = data.get("language")
+
         content_markdown = _build_stt_content_markdown(data)
 
         # 6. 필수값 검증
@@ -349,15 +453,19 @@ async def upload_and_process_stt(file: UploadFile, room_id: str,) -> dict:
             )
 
         # 7. 채팅방 생성 또는 갱신
-        ensure_conversation(
-            conversation_id=room_id,
-            title=result_filename,
-        )
+        # room_id가 있을 때만 conversations에 반영한다.
+        # room_id 없이 업로드된 독립 음성은 최근 채팅 목록에 뜨지 않아야 하므로
+        # ensure_conversation()을 호출하지 않는다.
+        if room_id:
+            ensure_conversation(
+                conversation_id=room_id,
+                title=result_filename,
+            )
 
         # 8. documents 테이블 저장
         saved_document_id = save_document_metadata({
             "id": document_id,
-            "conversation_id": room_id,
+            "conversation_id": db_room_id,
             "title": result_filename or title,
             "type": "voice",
             "source": "voice",
@@ -417,8 +525,12 @@ async def upload_and_process_stt(file: UploadFile, room_id: str,) -> dict:
             error=str(e),
         )
 
-# 업로드된 모든 음성 파일 목록 조회
+
 def get_stt_list() -> dict:
+    """
+    업로드된 모든 음성 파일 목록 조회.
+    8001 서버를 다시 호출하지 않고 8000 DB의 documents 기준으로 조회한다.
+    """
     try:
         rows = get_all_voice_documents()
 
@@ -429,10 +541,13 @@ def get_stt_list() -> dict:
             duration_sec = _get_duration_sec(metadata)
             file_id = _resolve_stt_file_id(row.get("id"), metadata)
 
+            conversation_id = row.get("conversation_id")
+            room_id = None if _is_voice_library_room_id(conversation_id) else conversation_id
+
             data.append({
                 "document_id": row.get("id"),
                 "file_id": file_id,
-                "room_id": row.get("conversation_id"),
+                "room_id": room_id,
                 "filename": row.get("title"),
                 "title": row.get("title"),
                 "type": row.get("type"),
@@ -460,8 +575,12 @@ def get_stt_list() -> dict:
             "error": str(e),
         }
 
-# 특정 음성 파일의 상세 정보와 발화 단위 전사 결과를 조회
+
 def get_stt_detail(document_id: str) -> dict:
+    """
+    특정 음성 파일의 상세 정보와 발화 단위 전사 결과를 조회한다.
+    8000 DB의 documents, document_chunks 기준으로 조회한다.
+    """
     try:
         document = get_document_by_id(document_id)
 
@@ -490,10 +609,14 @@ def get_stt_detail(document_id: str) -> dict:
         content_markdown = document.get("content_markdown") or ""
         content = _extract_plain_content_from_markdown(content_markdown)
 
+        conversation_id = document.get("conversation_id")
+        room_id = None if _is_voice_library_room_id(conversation_id) else conversation_id
+
         data = {
             "id": document.get("id"),
             "document_id": document.get("id"),
             "file_id": file_id,
+            "room_id": room_id,
             "title": document.get("title"),
             "filename": document.get("title"),
             "type": document.get("type"),
@@ -528,8 +651,22 @@ def get_stt_detail(document_id: str) -> dict:
             "error": str(e),
         }
 
-# 특정 음성 파일 삭제
+
 async def delete_stt_document(document_id: str) -> dict:
+    """
+    특정 음성 파일을 삭제한다.
+
+    프론트는 8000 서버에 document_id로 요청한다.
+    8000 서버는 metadata.original_file_url에서 audio_xxx 형태의 file_id를 추출해서
+    8001 DELETE /api/stt/{file_id}를 body 없이 URL path만으로 호출한다.
+
+    흐름:
+    1. 8000 DB에서 documents 조회
+    2. metadata.original_file_url에서 8001 file_id 추출
+    3. 8001 DELETE /api/stt/{file_id} 호출
+    4. 8000 DB에서 document_chunks 삭제
+    5. 8000 DB에서 documents 삭제
+    """
     try:
         document = get_document_by_id(document_id)
 

@@ -20,7 +20,7 @@ router = APIRouter(
 @router.post("/upload")
 async def upload_stt_file(
     file: UploadFile = File(...),
-    room_id: str = Form(...),
+    room_id: str | None = Form(None),
 ):
     return await upload_and_process_stt(
         file=file,
