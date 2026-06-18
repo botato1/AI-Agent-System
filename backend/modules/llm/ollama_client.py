@@ -173,6 +173,26 @@ def generate_answer(user_input: str, context: str = "") -> str:
     return response_text
 
 
+# ── 내부 유틸: 낮은 신뢰도 결과 안내 문구 생성 ──────────────────
+def _format_low_confidence_notice(retrieved_docs: list) -> str:
+    """
+    low_confidence=True일 때 사용자에게 보여줄 안내 문구.
+    "관련 문서를 찾을 수 없습니다" + 낮은 유사도로 검색된 문서명과 점수 목록.
+    retrieved_docs는 rag_service.retrieve_relevant_knowledge()의 data 리스트
+    (각 항목에 title, score 키를 가지고 있다고 가정).
+    """
+    if not retrieved_docs:
+        return "관련 문서를 찾을 수 없습니다."
+
+    lines = [f"관련 문서를 찾을 수 없습니다. 낮은 유사도로 검색된 문서 {len(retrieved_docs)}개:"]
+    for doc in retrieved_docs:
+        title = doc.get("title", "제목 없음")
+        score = doc.get("score", 0)
+        lines.append(f"- {title} (유사도 {score:.4f})")
+
+    return "\n".join(lines)
+
+
 # ── 흐름별 답변 생성 ──────────────────────────────────────────
 def generate_answer_for_graph(
     user_message: str,
@@ -180,33 +200,148 @@ def generate_answer_for_graph(
     rag_context: str = "",
     memory_context: str = "",
     tasks: list = None,
+    low_confidence: bool = False,
+    retrieved_docs: list = None,
 ) -> str:
     """
     question_type에 따라 프롬프트 자동 구성 후 LLM 호출.
     question_type 5개: task_from_rag, task_from_memory,
                         notion_save, knowledge_search, general_answer
+
+    [수정 사항 - 2026.06.17]
+    knowledge_search 분기에서 발생하던 "참고 문서가 제공되지 않았습니다" 오답 수정.
+    원인: 이 함수 안에서 만든 prompt(시스템가이드+규칙+질문 전체)를
+          generate_answer(prompt, context=rag_context)로 다시 감싸서 호출하면,
+          generate_answer 내부 템플릿의 "질문:" 자리에 그 prompt 전체가
+          통째로 들어가 버려 이중 래핑이 발생했음. STT 전사처럼 rag_context가
+          길 때 이 구조 때문에 모델이 참고 문서 위치를 못 찾는 경우가 있었음.
+    수정: knowledge_search 분기는 generate_answer()를 거치지 않고
+          Ollama를 직접 호출하도록 변경. rag_context가 비어있으면 LLM 호출 전에
+          바로 안내 문구를 반환하고, 비어있지 않으면 "참고 문서가 없다고
+          말하지 말라"는 지시를 프롬프트에 명시함.
+
+          참고: question_type 표기 차이(예: task_from_RAG vs task_from_rag)는
+          여기서 방어하지 않음. VALID_INTENTS와 classify_intent()가 이미
+          소문자(task_from_rag)로 일관되게 정의되어 있으므로, 대문자로 들어오는
+          입력은 호출하는 쪽(graph 노드 등)의 문제임. 해당 쪽에서 수정 필요.
+
+    [수정 사항 - 2026.06.18]
+    low_confidence / retrieved_docs 파라미터 추가.
+    rag_service.retrieve_relevant_knowledge()가 검색 결과의 최고 점수가
+    LOW_CONFIDENCE_THRESHOLD(0.3) 미만이면 low_confidence=True를 반환하도록
+    바뀌었음. 이 경우 적재 단계에서는 문서를 탈락시키지 않지만(크롤링 철학),
+    답변 단계에서는 "관련 문서를 찾을 수 없습니다"라고 먼저 안내하고,
+    그 다음 질문이 일반 기술 지식으로 답변 가능하면 그 설명을 이어서
+    제공하도록 프롬프트를 구성함. retrieved_docs는 낮은 유사도로 검색된
+    문서명+점수를 사용자에게 참고용으로 보여주기 위해 사용함.
     """
     tasks = tasks or []
     rag_context = rag_context or ""
     memory_context = memory_context or ""
+    retrieved_docs = retrieved_docs or []
 
-    if question_type == "knowledge_search" and rag_context:
-        prompt = f"""
+    # ── knowledge_search: 직접 Ollama 호출 (이중 래핑 제거) ──
+    if question_type == "knowledge_search":
+        if not rag_context.strip():
+            return "참고할 문서 내용을 찾지 못했습니다. 문서가 정상적으로 업로드되었는지 확인해 주세요."
+
+        if low_confidence:
+            # 관련 문서를 찾지 못한 경우: 안내 문구 + (가능하면) 일반 지식 기반 설명
+            low_confidence_notice = _format_low_confidence_notice(retrieved_docs)
+
+            # STT 전사처럼 너무 긴 컨텍스트는 잘라서 전달
+            trimmed_context = rag_context[:12000]
+
+            prompt = f"""[INST]
 {DOBY_SYSTEM_GUIDE}
 
-아래 참고 문서 내용만 사용해서 사용자 질문에 답해줘.
+아래 [참고 내용]은 사용자 질문과 유사도가 낮아 신뢰도가 떨어지는 검색 결과입니다.
 
-[규칙]
-- 참고 문서에 있는 내용만 근거로 답해라.
-- 참고 문서에 없는 내용은 모른다고 답해라.
-- 요약이 필요한 질문이면 핵심, 근거, 결론 순서로 정리해라.
-- 답변은 한국어로 작성해라.
+[참고 내용 (낮은 신뢰도)]
+{trimmed_context}
 
-사용자 질문:
+[사용자 질문]
 {user_message}
-"""
-        return generate_answer(prompt, context=rag_context)
 
+[답변 규칙]
+- 먼저 "{low_confidence_notice}" 내용을 한국어로 자연스럽게 안내하세요.
+- 그 다음, 질문이 일반적인 기술 지식으로 답변 가능한 내용이라면 [참고 내용]에
+  의존하지 말고 알고 있는 일반 지식으로 해결 방법을 설명하세요.
+- 일반 지식으로도 답하기 어려운 질문이면 안내 문구만 전달하고 추측하지 마세요.
+- 인사말 없이 바로 답변하세요.
+- 답변은 한국어로 작성하세요.
+[/INST]"""
+
+            response = httpx.post(
+                f"{OLLAMA_BASE_URL}/api/generate",
+                json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
+                timeout=120.0,
+            )
+            result = response.json()
+            response_text = result.get("response", "답변 생성 실패").strip()
+
+            if has_chinese(response_text):
+                response = httpx.post(
+                    f"{OLLAMA_BASE_URL}/api/generate",
+                    json={
+                        "model": OLLAMA_MODEL,
+                        "prompt": prompt + "\n반드시 한국어로만 다시 답하세요.",
+                        "stream": False,
+                    },
+                    timeout=120.0,
+                )
+                result = response.json()
+                response_text = result.get("response", "답변 생성 실패").strip()
+
+            return response_text
+
+        # 신뢰도가 충분한 경우: 기존 로직 그대로
+        trimmed_context = rag_context[:12000]
+
+        prompt = f"""[INST]
+{DOBY_SYSTEM_GUIDE}
+
+아래 [참고 내용]은 사용자가 선택한 문서 또는 음성 전사 내용입니다.
+[참고 내용]이 비어 있지 않다면 절대 "참고 문서가 없다"고 말하지 마세요.
+
+[참고 내용]
+{trimmed_context}
+
+[사용자 질문]
+{user_message}
+
+[답변 규칙]
+- 반드시 [참고 내용]만 근거로 답하세요.
+- 참고 내용에 없는 정보는 추측하지 마세요.
+- 사용자가 요약을 요청하면 핵심 내용을 한국어로 정리하세요.
+- 인사말 없이 바로 답변하세요.
+- 답변은 한국어로 작성하세요.
+[/INST]"""
+
+        response = httpx.post(
+            f"{OLLAMA_BASE_URL}/api/generate",
+            json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
+            timeout=120.0,
+        )
+        result = response.json()
+        response_text = result.get("response", "답변 생성 실패").strip()
+
+        if has_chinese(response_text):
+            response = httpx.post(
+                f"{OLLAMA_BASE_URL}/api/generate",
+                json={
+                    "model": OLLAMA_MODEL,
+                    "prompt": prompt + "\n반드시 한국어로만 다시 답하세요.",
+                    "stream": False,
+                },
+                timeout=120.0,
+            )
+            result = response.json()
+            response_text = result.get("response", "답변 생성 실패").strip()
+
+        return response_text
+
+    # ── task_from_rag / task_from_memory ──
     if question_type in ("task_from_rag", "task_from_memory") and tasks:
         task_context = json.dumps(tasks, ensure_ascii=False, indent=2)
         prompt = f"""
@@ -228,6 +363,7 @@ def generate_answer_for_graph(
 """
         return generate_answer(prompt, context=task_context)
 
+    # ── notion_save ──
     if question_type == "notion_save" and rag_context:
         prompt = f"""
 {DOBY_SYSTEM_GUIDE}
@@ -244,7 +380,7 @@ def generate_answer_for_graph(
 """
         return generate_answer(prompt, context=rag_context)
 
-    # general_answer 또는 fallback
+    # ── general_answer 또는 fallback ──
     prompt = f"""
 {DOBY_SYSTEM_GUIDE}
 
