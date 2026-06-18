@@ -259,11 +259,22 @@ class OllamaService:
         memory_context: str | None = None,
         tasks: list | None = None,
     ) -> str:
+        safe_rag_context = rag_context or ""
+        safe_memory_context = memory_context or ""
+
+        # STT 전사처럼 긴 문서는 모델 context 초과를 막기 위해 길이 제한
+        if len(safe_rag_context) > 12000:
+            safe_rag_context = safe_rag_context[:12000]
+
+        # 대화 기록도 너무 길어질 수 있으므로 제한
+        if len(safe_memory_context) > 8000:
+            safe_memory_context = safe_memory_context[:8000]
+
         return client_generate_answer_for_graph(
             user_message=user_message,
             question_type=question_type,
-            rag_context=rag_context or "",
-            memory_context=memory_context or "",
+            rag_context=safe_rag_context,
+            memory_context=safe_memory_context,
             tasks=tasks or [],
         )
 
