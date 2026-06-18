@@ -1,0 +1,114 @@
+# LangGraph 노드들을 하나의 실행 흐름으로 연결하는 파일
+from langgraph.graph import StateGraph, START, END
+
+from backend.schemas.agent_schema import AgentState
+from backend.graphs.nodes.classifier import classifier_node
+from backend.graphs.nodes.memory import memory_node
+from backend.graphs.nodes.rag import rag_node
+from backend.graphs.nodes.task import task_node
+from backend.graphs.nodes.answer import answer_node
+from backend.graphs.nodes.notion import notion_node
+
+
+def route_after_classifier(state: AgentState) -> str:
+    question_type = state.get("question_type", "general_answer")
+
+    if question_type == "task_from_memory":
+        return "memory"
+
+    if question_type in {"task_from_RAG", "notion_save", "knowledge_search"}:
+        return "rag"
+
+    return "answer"
+
+
+def route_after_memory(state: AgentState) -> str:
+    question_type = state.get("question_type", "general_answer")
+
+    if question_type == "task_from_memory":
+        return "task"
+
+    return "answer"
+
+
+def route_after_rag(state: AgentState) -> str:
+    question_type = state.get("question_type", "general_answer")
+
+    if question_type == "task_from_RAG":
+        return "task"
+
+    if question_type == "notion_save":
+        return "notion"
+
+    return "answer"
+
+
+def route_after_answer(state: AgentState) -> str:
+    return "end"
+
+
+def build_agent_graph():
+    graph = StateGraph(AgentState)
+
+    # 1. 노드 등록
+    graph.add_node("classifier", classifier_node)
+    graph.add_node("memory", memory_node)
+    graph.add_node("rag", rag_node)
+    graph.add_node("task", task_node)
+    graph.add_node("answer", answer_node)
+    graph.add_node("notion", notion_node)
+
+    # 2. 시작
+    graph.add_edge(START, "classifier")
+
+    # 3. classifier 이후 question_type 기준으로 첫 노드 이동
+    graph.add_conditional_edges(
+        "classifier",
+        route_after_classifier,
+        {
+            "memory": "memory",
+            "rag": "rag",
+            "answer": "answer",
+        },
+    )
+
+    # 4. memory 이후 task 또는 answer 이동
+    graph.add_conditional_edges(
+        "memory",
+        route_after_memory,
+        {
+            "task": "task",
+            "answer": "answer",
+        },
+    )
+
+    # 5. rag 이후 question_type 기준으로 후처리 노드 이동
+    graph.add_conditional_edges(
+        "rag",
+        route_after_rag,
+        {
+            "task": "task",
+            "notion": "notion",
+            "answer": "answer",
+        },
+    )
+
+    # 6. task 이후 answer
+    graph.add_edge("task", "answer")
+
+    # 7. answer 이후 종료
+    graph.add_conditional_edges(
+        "answer",
+        route_after_answer,
+        {
+            "end": END,
+        },
+    )
+
+    # 8. notion 이후 종료
+    graph.add_edge("notion", END)
+
+    return graph.compile()
+
+
+agent_graph = build_agent_graph()
