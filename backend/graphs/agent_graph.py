@@ -16,7 +16,7 @@ def route_after_classifier(state: AgentState) -> str:
     if question_type == "task_from_memory":
         return "memory"
 
-    if question_type in {"task_from_RAG", "notion_save", "knowledge_search"}:
+    if question_type in {"task_from_rag", "notion_save", "knowledge_search"}:
         return "rag"
 
     return "answer"
@@ -34,7 +34,7 @@ def route_after_memory(state: AgentState) -> str:
 def route_after_rag(state: AgentState) -> str:
     question_type = state.get("question_type", "general_answer")
 
-    if question_type == "task_from_RAG":
+    if question_type == "task_from_rag":
         return "task"
 
     if question_type == "notion_save":
