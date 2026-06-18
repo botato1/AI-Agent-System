@@ -8,9 +8,10 @@ interface HomeProps {
   setActiveRoomId: (id: string | null) => void
   targetFilename: string | null
   onGoToAnalysis?: () => void
+  onClearFilename?: () => void
 }
 
-export default function Home({ onRoomCreated, activeRoomId, setActiveRoomId, targetFilename, onGoToAnalysis }: HomeProps) {
+export default function Home({ onRoomCreated, activeRoomId, setActiveRoomId, targetFilename, onGoToAnalysis, onClearFilename }: HomeProps) {
   return (
     <div className="flex flex-col h-[calc(100vh-48px)]">
       <div className="flex items-center justify-between mb-4">
@@ -19,7 +20,10 @@ export default function Home({ onRoomCreated, activeRoomId, setActiveRoomId, tar
           <p className="text-sm text-gray-400 mt-1">오늘도 당신의 업무를 스마트하게 도와드릴게요.</p>
         </div>
         <button
-          onClick={() => setActiveRoomId(null)}
+          onClick={() => {
+            setActiveRoomId(null)
+            onClearFilename?.()
+          }}
           className="flex items-center gap-1.5 text-xs text-white bg-blue-600 px-3 py-2 rounded-lg hover:bg-blue-700 transition"
         >
           + 새 채팅

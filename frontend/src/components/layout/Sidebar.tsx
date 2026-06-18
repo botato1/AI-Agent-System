@@ -40,9 +40,10 @@ interface SidebarProps {
   onCollapse: (v: boolean) => void
   refreshKey?: number
   onRoomSelect: (room_id: string, filename: string | null) => void
+  uploadingFile?: string | null
 }
 
-export default function Sidebar({ activePage, onPageChange, isDark, onToggleDark, onCollapse, refreshKey, onRoomSelect }: SidebarProps) {
+export default function Sidebar({ activePage, onPageChange, isDark, onToggleDark, onCollapse, refreshKey, onRoomSelect, uploadingFile }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false)
   const [chatCollapsed, setChatCollapsed] = useState(false)
   const [recentChats, setRecentChats] = useState<Conversation[]>([])
@@ -189,6 +190,32 @@ export default function Sidebar({ activePage, onPageChange, isDark, onToggleDark
           </div>
         )}
       </nav>
+
+      {/* 업로드 중 배너 */}
+      {uploadingFile && !collapsed && (
+        <div className="mx-3 mb-3 px-3 py-2 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg">
+          <div className="flex items-center gap-2">
+            <svg className="w-3 h-3 text-blue-500 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+            </svg>
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-blue-600 dark:text-blue-400">분석 중...</p>
+              <p className="text-xs text-blue-400 dark:text-blue-500 truncate">{uploadingFile}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 접힌 모드 업로드 중 표시 */}
+      {uploadingFile && collapsed && (
+        <div className="flex justify-center mb-3">
+          <svg className="w-4 h-4 text-blue-500 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+          </svg>
+        </div>
+      )}
 
       {/* 다크모드, 유저 프로필 */}
       {!collapsed && (

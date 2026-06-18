@@ -21,9 +21,11 @@ interface PipelineProps {
   onRoomCreated?: () => void
   onFileUploaded?: (filename: string, analysisData?: any) => void
   onRoomIdCreated?: (roomId: string) => void
+  onUploadStart?: (filename: string) => void
+  onUploadEnd?: () => void
 }
 
-export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview, onRoomCreated, onFileUploaded, onRoomIdCreated }: PipelineProps) {
+export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview, onRoomCreated, onFileUploaded, onRoomIdCreated, onUploadStart, onUploadEnd }: PipelineProps) {
   const [file, setFile] = useState<string | null>(null)
   const [statuses, setStatuses] = useState<Status[]>(Array(6).fill('wait'))
   const [currentStep, setCurrentStep] = useState(-1)
@@ -38,11 +40,12 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
   }
 
   const startPipeline = async (selectedFile: File) => {
-  setFile(selectedFile.name)
-  setStatuses(Array(6).fill('wait'))
-  setLogs([])
-  setUploadError(null)
-  setIsRunning(true)
+    onUploadStart?.(selectedFile.name)
+    setFile(selectedFile.name)
+    setStatuses(Array(6).fill('wait'))
+    setLogs([])
+    setUploadError(null)
+    setIsRunning(true)
 
   addLog('채팅방 생성 중...')
   try {
@@ -88,6 +91,7 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
     setUploadError(err.message)
     addLog(`오류: ${err.message}`)
     setIsRunning(false)
+    onUploadEnd?.()
   }
 }
 
@@ -95,6 +99,7 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
     if (currentStep < 0 || currentStep >= 6) {
       if (currentStep === 6) {
         setIsRunning(false)
+        onUploadEnd?.()
       if (Notification.permission === 'granted'){
         new Notification('문서 분석 완료',{
           body : `${file} 분석이 완료됐어요!`,
