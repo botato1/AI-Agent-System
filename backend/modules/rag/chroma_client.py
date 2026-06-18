@@ -4,6 +4,7 @@ import sys
 import pickle
 from pathlib import Path
 from rank_bm25 import BM25Okapi
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 BASE_DIR = Path(__file__).resolve().parents[3]
 if str(BASE_DIR) not in sys.path:
@@ -23,11 +24,10 @@ MEETING_COLLECTION  = "meeting_collection"
 DOCUMENT_COLLECTION = "document_collection"
 KNOWLEDGE_COLLECTION = "knowledge_collection"
 
-# upload_context → 컬렉션 매핑
 CONTEXT_TO_COLLECTION = {
-    "voice":    MEETING_COLLECTION,    # 음성 STT → 회의록
-    "meeting":  MEETING_COLLECTION,    # 사용자가 "회의록"으로 올린 문서
-    "document": DOCUMENT_COLLECTION,   # 사용자가 "참고문서"로 올린 문서
+    "voice":    MEETING_COLLECTION,
+    "meeting":  MEETING_COLLECTION,
+    "document": DOCUMENT_COLLECTION,
 }
 
 
@@ -116,12 +116,6 @@ def insert_document(doc: dict):
         "tech_score":       doc.get("tech_score", 0),
     }
 
-    print("[insert_document] collection:", collection_name)
-    print("[insert_document] chunk_id:", doc.get("id"))
-    print("[insert_document] document_id:", metadata.get("document_id"))
-    print("[insert_document] filename:", metadata.get("filename"))
-    print("[insert_document] room_id:", metadata.get("room_id"))
-
     collection.add(
         ids=[doc["id"]],
         documents=[doc["content"]],
@@ -138,7 +132,18 @@ def _get_reranker():
     global _reranker
     if _reranker is None:
         from FlagEmbedding import FlagReranker
-        _reranker = FlagReranker("BAAI/bge-reranker-v2-m3", use_fp16=True)
+        # use_fp16=False + devices=["cpu"]로 안전하게 로드.
+        # GPU+fp16 조합에서 환경에 따라 프로세스가 에러 없이
+        # 죽는 문제가 있어 CPU/fp32로 고정해서 안정성 우선.
+        # (속도가 더 필요해지면 devices=["cuda:0"]로 다시 전환 가능,
+        #  단 그 경우 use_fp16=False부터 먼저 테스트할 것)
+        print("[reranker] BAAI/bge-reranker-v2-m3 로딩 중 (CPU, fp32)...")
+        _reranker = FlagReranker(
+            "BAAI/bge-reranker-v2-m3",
+            use_fp16=False,
+            devices=["cpu"],
+        )
+        print("[reranker] 로딩 완료")
     return _reranker
 
 
@@ -146,7 +151,7 @@ def rerank_results(query_text: str, results: list[dict]) -> list[dict]:
     """
     results 각각의 content와 query를 cross-encoder로 재평가.
     각 결과에 reranker_score 필드를 추가하고 반환 (정렬은 하지 않음).
-    FlagEmbedding 미설치 시 reranker_score = hybrid_score로 fallback.
+    FlagEmbedding 미설치/로딩실패 시 reranker_score = hybrid_score로 fallback.
     """
     if not results:
         return results
@@ -177,10 +182,6 @@ def search_hybrid(
     filter: dict | None = None,
     collection_name: str | None = None
 ):
-    """
-    BGE-M3 벡터 70% + BM25 키워드 30% 하이브리드 검색.
-    collection_name을 지정하면 해당 컬렉션만 검색.
-    """
     target_collections = [collection_name] if collection_name else [
         MEETING_COLLECTION, DOCUMENT_COLLECTION, KNOWLEDGE_COLLECTION
     ]

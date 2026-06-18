@@ -2,7 +2,9 @@
 # SQLite 데이터베이스 연결 및 초기화
 import sqlite3
 from pathlib import Path
+
 from backend.core.config import settings
+
 
 DB_PATH = Path(settings.SQLITE_DB_PATH)
 
@@ -10,8 +12,14 @@ DB_PATH = Path(settings.SQLITE_DB_PATH)
 def get_connection():
     db_path = Path(settings.SQLITE_DB_PATH)
     db_path.parent.mkdir(parents=True, exist_ok=True)
+
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+
+    # 현재 프로젝트는 FK 강제 정책을 전체적으로 통일하지 않았으므로 보류
+    # 필요 시 전체 DB 정책 확정 후 아래 옵션 사용
+    # conn.execute("PRAGMA foreign_keys = ON")
+
     return conn
 
 
@@ -64,6 +72,9 @@ def init_db():
     """)
 
     # 5. documents
+    # 문서/PDF/STT 결과의 공통 메타데이터 저장 테이블.
+    # STT 상세 조회에서 duration_sec, model_used, original_file_url 등을
+    # 다시 내려줘야 하므로 metadata를 JSON 문자열로 저장한다.
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS documents (
         id               TEXT PRIMARY KEY,
@@ -78,6 +89,7 @@ def init_db():
         status           TEXT DEFAULT 'uploaded',
         notion_url       TEXT,
         error            TEXT,
+        metadata         TEXT DEFAULT '{}',
         created_at       TEXT NOT NULL
     )
     """)
@@ -121,21 +133,25 @@ def init_db():
     )
     """)
 
-    # ── 마이그레이션 (기존 DB에 컬럼/테이블 없을 때 자동 추가) ────
+    # ── 마이그레이션 (기존 DB에 컬럼 없을 때 자동 추가) ────
     migrations = [
         "ALTER TABLE documents ADD COLUMN json_path TEXT DEFAULT ''",
         "ALTER TABLE documents ADD COLUMN content_markdown TEXT DEFAULT ''",
+        "ALTER TABLE documents ADD COLUMN metadata TEXT DEFAULT '{}'",
         "ALTER TABLE tasks ADD COLUMN priority TEXT DEFAULT 'medium'",
     ]
+
     for sql in migrations:
         try:
             cursor.execute(sql)
             print(f"[migration] 적용: {sql}")
         except Exception:
-            pass  # 이미 존재하면 무시
+            # 이미 존재하는 컬럼이면 무시
+            pass
 
     conn.commit()
     conn.close()
+
     print("DB 초기화 완료:", settings.SQLITE_DB_PATH)
 
 

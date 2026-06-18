@@ -11,13 +11,10 @@ def get_utc_now() -> str:
 
 def make_conversation_title(content: str, max_length: int = 30) -> str:
     content = (content or "").strip().replace("\n", " ")
-
     if not content:
         return "새 채팅"
-
     if len(content) > max_length:
         return content[:max_length] + "..."
-
     return content
 
 
@@ -31,7 +28,6 @@ def create_conversation(title: str) -> str:
 
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
         INSERT INTO conversations (
@@ -44,7 +40,6 @@ def create_conversation(title: str) -> str:
         """,
         (conv_id, title, now, now),
     )
-
     conn.commit()
     conn.close()
 
@@ -56,7 +51,6 @@ def ensure_conversation(conversation_id: str, title: str = "새 채팅"):
 
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
         SELECT id
@@ -98,7 +92,6 @@ def update_conversation_timestamp(conversation_id: str):
 
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
         UPDATE conversations
@@ -107,7 +100,6 @@ def update_conversation_timestamp(conversation_id: str):
         """,
         (now, conversation_id),
     )
-
     conn.commit()
     conn.close()
 
@@ -119,7 +111,6 @@ def get_conversations() -> list:
     """
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
         SELECT
@@ -140,9 +131,7 @@ def get_conversations() -> list:
         ORDER BY c.updated_at DESC
         """
     )
-
     rows = cursor.fetchall() or []
-
     conn.close()
 
     return [dict(row) for row in rows]
@@ -151,7 +140,6 @@ def get_conversations() -> list:
 def get_conversation_by_id(room_id: str):
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
         SELECT id, title, created_at, updated_at
@@ -160,9 +148,7 @@ def get_conversation_by_id(room_id: str):
         """,
         (room_id,),
     )
-
     row = cursor.fetchone()
-
     conn.close()
 
     return dict(row) if row else None
@@ -187,7 +173,6 @@ def delete_conversation(room_id: str) -> bool:
         """,
         (room_id,),
     )
-
     cursor.execute(
         """
         DELETE FROM messages
@@ -195,7 +180,6 @@ def delete_conversation(room_id: str) -> bool:
         """,
         (room_id,),
     )
-
     cursor.execute(
         """
         DELETE FROM tasks
@@ -203,7 +187,6 @@ def delete_conversation(room_id: str) -> bool:
         """,
         (room_id,),
     )
-
     cursor.execute(
         """
         DELETE FROM documents
@@ -211,7 +194,6 @@ def delete_conversation(room_id: str) -> bool:
         """,
         (room_id,),
     )
-
     cursor.execute(
         """
         DELETE FROM summaries
@@ -219,7 +201,6 @@ def delete_conversation(room_id: str) -> bool:
         """,
         (room_id,),
     )
-
     cursor.execute(
         """
         DELETE FROM important_facts
@@ -227,7 +208,6 @@ def delete_conversation(room_id: str) -> bool:
         """,
         (room_id,),
     )
-
     cursor.execute(
         """
         DELETE FROM conversations
@@ -237,7 +217,6 @@ def delete_conversation(room_id: str) -> bool:
     )
 
     deleted_count = cursor.rowcount
-
     conn.commit()
     conn.close()
 
@@ -278,7 +257,6 @@ def insert_message(conversation_id: str, role: str, content: str) -> str:
 
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
         SELECT id
@@ -290,7 +268,6 @@ def insert_message(conversation_id: str, role: str, content: str) -> str:
 
     if cursor.fetchone() is None:
         title = make_conversation_title(content) if role == "user" else "새 채팅"
-
         cursor.execute(
             """
             INSERT INTO conversations (
@@ -317,7 +294,6 @@ def insert_message(conversation_id: str, role: str, content: str) -> str:
         """,
         (msg_id, conversation_id, role, content, now),
     )
-
     cursor.execute(
         """
         UPDATE conversations
@@ -336,7 +312,6 @@ def insert_message(conversation_id: str, role: str, content: str) -> str:
 def get_messages(conversation_id: str) -> list:
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
         SELECT id, role, content, created_at
@@ -346,9 +321,7 @@ def get_messages(conversation_id: str) -> list:
         """,
         (conversation_id,),
     )
-
     rows = cursor.fetchall() or []
-
     conn.close()
 
     return [dict(row) for row in rows]
@@ -357,7 +330,6 @@ def get_messages(conversation_id: str) -> list:
 def delete_message(message_id: str) -> bool:
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
         DELETE FROM messages
@@ -365,9 +337,7 @@ def delete_message(message_id: str) -> bool:
         """,
         (message_id,),
     )
-
     deleted_count = cursor.rowcount
-
     conn.commit()
     conn.close()
 
@@ -384,7 +354,6 @@ def insert_summary(conversation_id: str, summary_text: str, token_count: int = N
 
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
         INSERT INTO summaries (
@@ -397,7 +366,6 @@ def insert_summary(conversation_id: str, summary_text: str, token_count: int = N
         """,
         (conversation_id, summary_text, token_count, now),
     )
-
     conn.commit()
     conn.close()
 
@@ -405,7 +373,6 @@ def insert_summary(conversation_id: str, summary_text: str, token_count: int = N
 def get_latest_summary(conversation_id: str) -> dict | None:
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
         SELECT summary, token_count, created_at
@@ -416,9 +383,7 @@ def get_latest_summary(conversation_id: str) -> dict | None:
         """,
         (conversation_id,),
     )
-
     row = cursor.fetchone()
-
     conn.close()
 
     return dict(row) if row else None
@@ -434,7 +399,6 @@ def insert_fact(conversation_id: str, fact_text: str, category: str = "환경"):
 
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
         INSERT INTO important_facts (
@@ -447,7 +411,6 @@ def insert_fact(conversation_id: str, fact_text: str, category: str = "환경"):
         """,
         (conversation_id, fact_text, category, now),
     )
-
     conn.commit()
     conn.close()
 
@@ -455,7 +418,6 @@ def insert_fact(conversation_id: str, fact_text: str, category: str = "환경"):
 def get_all_facts(conversation_id: str) -> list:
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
         SELECT fact, category, created_at
@@ -465,9 +427,7 @@ def get_all_facts(conversation_id: str) -> list:
         """,
         (conversation_id,),
     )
-
     rows = cursor.fetchall() or []
-
     conn.close()
 
     return [dict(row) for row in rows]
@@ -478,12 +438,17 @@ def get_all_facts(conversation_id: str) -> list:
 # ==========================================
 
 def save_document_metadata(doc: dict) -> str:
-    doc_id = doc.get("id", str(uuid.uuid4()))
+    """
+    문서/STT 결과 메타데이터를 documents 테이블에 저장한다.
+
+    metadata는 STT 상세 조회에서 duration_sec, model_used, original_file_url 등을
+    복원하기 위해 JSON 문자열 형태로 저장한다.
+    """
+    doc_id = doc.get("id") or str(uuid.uuid4())
     now = get_utc_now()
 
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
         INSERT INTO documents (
@@ -499,9 +464,24 @@ def save_document_metadata(doc: dict) -> str:
             status,
             notion_url,
             error,
+            metadata,
             created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            conversation_id = excluded.conversation_id,
+            title = excluded.title,
+            type = excluded.type,
+            source = excluded.source,
+            file_path = excluded.file_path,
+            json_path = excluded.json_path,
+            content_markdown = excluded.content_markdown,
+            summary = excluded.summary,
+            status = excluded.status,
+            notion_url = excluded.notion_url,
+            error = excluded.error,
+            metadata = excluded.metadata,
+            created_at = excluded.created_at
         """,
         (
             doc_id,
@@ -516,10 +496,10 @@ def save_document_metadata(doc: dict) -> str:
             doc.get("status", "processed"),
             doc.get("notion_url", ""),
             doc.get("error", ""),
+            doc.get("metadata", "{}"),
             now,
         ),
     )
-
     conn.commit()
     conn.close()
 
@@ -527,30 +507,42 @@ def save_document_metadata(doc: dict) -> str:
 
 
 def get_documents(conversation_id: str) -> list:
+    """
+    특정 채팅방의 문서 목록을 조회한다.
+    """
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
-        SELECT id, title, type, source, summary, status, created_at, json_path
+        SELECT
+            id,
+            title,
+            type,
+            source,
+            summary,
+            status,
+            created_at,
+            json_path,
+            metadata
         FROM documents
         WHERE conversation_id = ?
         ORDER BY created_at DESC
         """,
         (conversation_id,),
     )
-
     rows = cursor.fetchall() or []
-
     conn.close()
 
     return [dict(row) for row in rows]
 
 
 def get_document_by_id(document_id: str) -> dict | None:
+    """
+    document_id 기준으로 문서 단건을 조회한다.
+    STT 상세 조회에서도 사용한다.
+    """
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
         SELECT
@@ -564,6 +556,9 @@ def get_document_by_id(document_id: str) -> dict | None:
             content_markdown,
             summary,
             status,
+            notion_url,
+            error,
+            metadata,
             created_at
         FROM documents
         WHERE id = ?
@@ -571,9 +566,7 @@ def get_document_by_id(document_id: str) -> dict | None:
         """,
         (document_id,),
     )
-
     row = cursor.fetchone()
-
     conn.close()
 
     return dict(row) if row else None
@@ -585,7 +578,6 @@ def get_all_documents() -> list:
     """
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
         SELECT
@@ -594,26 +586,28 @@ def get_all_documents() -> list:
             conversation_id AS room_id,
             type,
             json_path,
+            metadata,
             created_at
         FROM documents
         ORDER BY created_at DESC
         """
     )
-
     rows = cursor.fetchall() or []
-
     conn.close()
 
     return [dict(row) for row in rows]
 
 
 def get_latest_document_by_conversation(conversation_id: str) -> dict | None:
+    """
+    특정 채팅방의 가장 최근 업로드 문서를 조회한다.
+    chat_service에서 target_document_id 보완할 때 사용한다.
+    """
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
-        SELECT id, title, json_path
+        SELECT id, title, json_path, metadata
         FROM documents
         WHERE conversation_id = ?
         ORDER BY created_at DESC
@@ -621,9 +615,7 @@ def get_latest_document_by_conversation(conversation_id: str) -> dict | None:
         """,
         (conversation_id,),
     )
-
     row = cursor.fetchone()
-
     conn.close()
 
     return dict(row) if row else None
@@ -633,12 +625,14 @@ def get_document_by_filename_and_conversation(
     conversation_id: str,
     filename: str,
 ) -> dict | None:
+    """
+    특정 채팅방에서 파일명으로 문서를 조회한다.
+    """
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
-        SELECT id, title, json_path
+        SELECT id, title, json_path, metadata
         FROM documents
         WHERE conversation_id = ?
           AND title = ?
@@ -647,12 +641,104 @@ def get_document_by_filename_and_conversation(
         """,
         (conversation_id, filename),
     )
-
     row = cursor.fetchone()
-
     conn.close()
 
     return dict(row) if row else None
+
+
+def _get_voice_documents(conversation_id: str | None = None) -> list[dict]:
+    """
+    음성 문서 목록 조회 공통 함수.
+
+    conversation_id가 있으면 특정 채팅방의 음성 목록을 조회하고,
+    없으면 전체 업로드 음성 목록을 조회한다.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    if conversation_id:
+        cursor.execute(
+            """
+            SELECT
+                id,
+                conversation_id,
+                title,
+                type,
+                source,
+                file_path,
+                summary,
+                status,
+                metadata,
+                created_at
+            FROM documents
+            WHERE conversation_id = ?
+              AND type = 'voice'
+            ORDER BY created_at DESC
+            """,
+            (conversation_id,),
+        )
+    else:
+        cursor.execute(
+            """
+            SELECT
+                id,
+                conversation_id,
+                title,
+                type,
+                source,
+                file_path,
+                summary,
+                status,
+                metadata,
+                created_at
+            FROM documents
+            WHERE type = 'voice'
+            ORDER BY created_at DESC
+            """
+        )
+
+    rows = cursor.fetchall() or []
+    conn.close()
+
+    return [dict(row) for row in rows]
+
+
+def get_all_voice_documents() -> list[dict]:
+    """
+    업로드된 모든 음성 문서 목록을 조회한다.
+    프론트 음성 목록 페이지에서 사용한다.
+    """
+    return _get_voice_documents()
+
+
+def get_voice_documents_by_conversation(conversation_id: str) -> list[dict]:
+    """
+    특정 채팅방에 업로드된 음성 문서 목록을 조회한다.
+    필요 시 채팅방별 필터링에 사용한다.
+    """
+    return _get_voice_documents(conversation_id=conversation_id)
+
+
+def delete_document(document_id: str) -> bool:
+    """
+    documents 테이블에서 특정 문서 하나를 삭제한다.
+    document_chunks 삭제는 호출부에서 먼저 처리하는 것을 권장한다.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        DELETE FROM documents
+        WHERE id = ?
+        """,
+        (document_id,),
+    )
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+
+    return deleted > 0
 
 
 # ==========================================
@@ -667,7 +753,6 @@ def save_tasks(tasks: list, document_id: str, conversation_id: str):
 
     for task in tasks:
         task_id = str(uuid.uuid4())
-
         cursor.execute(
             """
             INSERT INTO tasks (
@@ -706,7 +791,6 @@ def create_task(task_data: dict) -> dict:
 
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
         INSERT INTO tasks (
@@ -734,7 +818,6 @@ def create_task(task_data: dict) -> dict:
             now,
         ),
     )
-
     conn.commit()
     conn.close()
 
@@ -754,7 +837,6 @@ def create_task(task_data: dict) -> dict:
 def get_all_tasks() -> list:
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
         SELECT
@@ -771,9 +853,7 @@ def get_all_tasks() -> list:
         ORDER BY created_at DESC
         """
     )
-
     rows = cursor.fetchall() or []
-
     conn.close()
 
     return [dict(row) for row in rows]
@@ -782,7 +862,6 @@ def get_all_tasks() -> list:
 def get_tasks(conversation_id: str) -> list:
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
         SELECT id, task, assignee, deadline, status, priority, created_at
@@ -792,9 +871,7 @@ def get_tasks(conversation_id: str) -> list:
         """,
         (conversation_id,),
     )
-
     rows = cursor.fetchall() or []
-
     conn.close()
 
     return [dict(row) for row in rows]
@@ -803,7 +880,6 @@ def get_tasks(conversation_id: str) -> list:
 def update_task_status(task_id: str, status: str) -> bool:
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
         UPDATE tasks
@@ -812,9 +888,7 @@ def update_task_status(task_id: str, status: str) -> bool:
         """,
         (status, task_id),
     )
-
     updated = cursor.rowcount
-
     conn.commit()
     conn.close()
 
@@ -824,7 +898,6 @@ def update_task_status(task_id: str, status: str) -> bool:
 def update_task_priority(task_id: str, priority: str) -> bool:
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
         UPDATE tasks
@@ -833,9 +906,7 @@ def update_task_priority(task_id: str, priority: str) -> bool:
         """,
         (priority, task_id),
     )
-
     updated = cursor.rowcount
-
     conn.commit()
     conn.close()
 
@@ -845,7 +916,6 @@ def update_task_priority(task_id: str, priority: str) -> bool:
 def delete_task(task_id: str) -> bool:
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
         DELETE FROM tasks
@@ -853,9 +923,7 @@ def delete_task(task_id: str) -> bool:
         """,
         (task_id,),
     )
-
     deleted = cursor.rowcount
-
     conn.commit()
     conn.close()
 
@@ -899,12 +967,10 @@ def save_document_chunks(document_id: str, transcription: list[dict]) -> int:
 
     conn = get_connection()
     cursor = conn.cursor()
-
     saved_count = 0
 
     for idx, seg in enumerate(transcription):
         content = seg.get("text") or ""
-
         # 빈 발화는 저장하지 않음
         if not content.strip():
             continue
@@ -934,7 +1000,6 @@ def save_document_chunks(document_id: str, transcription: list[dict]) -> int:
                 1 if seg.get("user_edited") else 0,
             ),
         )
-
         saved_count += 1
 
     conn.commit()
@@ -949,7 +1014,6 @@ def get_document_chunks(document_id: str) -> list:
     """
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
         SELECT
@@ -969,9 +1033,7 @@ def get_document_chunks(document_id: str) -> list:
         """,
         (document_id,),
     )
-
     rows = cursor.fetchall() or []
-
     conn.close()
 
     return [dict(row) for row in rows]
@@ -984,7 +1046,6 @@ def update_chunk_content(chunk_id: int, new_content: str) -> bool:
     """
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
         UPDATE document_chunks
@@ -994,9 +1055,7 @@ def update_chunk_content(chunk_id: int, new_content: str) -> bool:
         """,
         (new_content, chunk_id),
     )
-
     updated = cursor.rowcount
-
     conn.commit()
     conn.close()
 
@@ -1010,7 +1069,6 @@ def delete_document_chunks(document_id: str) -> int:
     """
     conn = get_connection()
     cursor = conn.cursor()
-
     cursor.execute(
         """
         DELETE FROM document_chunks
@@ -1018,9 +1076,7 @@ def delete_document_chunks(document_id: str) -> int:
         """,
         (document_id,),
     )
-
     deleted = cursor.rowcount
-
     conn.commit()
     conn.close()
 
