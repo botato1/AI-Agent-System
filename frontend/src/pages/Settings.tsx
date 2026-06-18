@@ -10,7 +10,10 @@ export default function Settings() {
     taskDeadline: true,
   })
 
-  const toggleNotification = (key: keyof typeof notifications) => {
+  const toggleNotification = async (key: keyof typeof notifications) => {
+    if (!notifications[key] && 'Notification' in window) {
+      await Notification.requestPermission()
+    }
     setNotifications(prev => ({ ...prev, [key]: !prev[key] }))
   }
 

@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 
 const STT_URL = 'http://192.168.0.245:8001'
 
@@ -23,7 +23,7 @@ interface VoiceFile {
   duration: string
   size: string
   uploadDate: string
-  sttResult: SttResult
+  sttResult: SttResult | null
 }
 
 interface Props {
@@ -36,11 +36,6 @@ const formatDuration = (seconds: number) => {
   return `${m}:${s}`
 }
 
-const formatSize = (bytes: number) => {
-  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)}MB`
-  return `${(bytes / 1024).toFixed(1)}KB`
-}
-
 export default function Voice({ onAnalyze }: Props) {
   const [files, setFiles] = useState<VoiceFile[]>([])
   const [prompt, setPrompt] = useState('')
@@ -48,6 +43,28 @@ export default function Voice({ onAnalyze }: Props) {
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    fetch(`${STT_URL}/api/list`, { method: 'GET' })
+      .then(r => r.json())
+      .then(data => {
+        if (data.status === 'success') {
+          const loaded: VoiceFile[] = data.data.map((item: any) => ({
+            id: item.filename,
+            name: item.original_filename ?? item.filename,
+            duration: '--:--',
+            size: `${item.size_mb}MB`,
+            uploadDate: new Date(item.created_at).toLocaleString('ko-KR', {
+              year: 'numeric', month: '2-digit', day: '2-digit',
+              hour: '2-digit', minute: '2-digit',
+            }),
+            sttResult: null,
+          }))
+          setFiles(loaded)
+        }
+      })
+      .catch(err => console.error('목록 불러오기 실패:', err))
+  }, [])
 
   const handleUpload = async (selectedFile: File) => {
     setUploading(true)
@@ -82,7 +99,7 @@ export default function Voice({ onAnalyze }: Props) {
         id,
         name: selectedFile.name,
         duration: formatDuration(metadata.duration_sec),
-        size: formatSize(selectedFile.size),
+        size: `${(selectedFile.size / 1024 / 1024).toFixed(1)}MB`,
         uploadDate: new Date().toLocaleString('ko-KR', {
           year: 'numeric', month: '2-digit', day: '2-digit',
           hour: '2-digit', minute: '2-digit',
@@ -90,6 +107,7 @@ export default function Voice({ onAnalyze }: Props) {
         sttResult,
       }
       setFiles(prev => [newFile, ...prev])
+      onAnalyze(id, sttResult)
 
     } catch (err: any) {
       setUploadError(err.message)
@@ -110,6 +128,41 @@ export default function Voice({ onAnalyze }: Props) {
     if (dropped) handleUpload(dropped)
   }
 
+  const handleDelete = async (file: VoiceFile) => {
+    if (!confirm('파일을 삭제할까요?')) return
+    const fileId = file.id.replace(/\.[^/.]+$/, '')
+    try {
+      await fetch(`${STT_URL}/api/stt/${fileId}`, { method: 'DELETE' })
+      setFiles(prev => prev.filter(f => f.id !== file.id))
+    } catch (err) {
+      console.error('삭제 실패:', err)
+    }
+  }
+
+  const handleAnalyze = async (file: VoiceFile) => {
+    if (file.sttResult) {
+      onAnalyze(file.id, file.sttResult)
+    } else {
+      const fileId = file.id.replace(/\.[^/.]+$/, '')
+      try {
+        const res = await fetch(`${STT_URL}/api/stt/${fileId}`, { method: 'GET' })
+        const data = await res.json()
+        if (data.status === 'success') {
+          const sttResult: SttResult = {
+            file_id: data.data.id,
+            duration: data.data.metadata.duration_sec,
+            segments: data.data.transcription,
+            fileName: data.data.title ?? file.name,
+          }
+          setFiles(prev => prev.map(f => f.id === file.id ? { ...f, sttResult } : f))
+          onAnalyze(fileId, sttResult)
+        }
+      } catch (err) {
+        console.error('조회 실패:', err)
+      }
+    }
+  }
+
   return (
     <div className="flex-1 p-8 overflow-y-auto bg-white dark:bg-[#161616]">
       <div className="mb-6">
@@ -118,7 +171,6 @@ export default function Voice({ onAnalyze }: Props) {
       </div>
 
       <div className="grid grid-cols-2 gap-4 mb-4">
-        {/* 업로드 영역 */}
         <div
           onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
           onDragLeave={() => setIsDragging(false)}
@@ -156,10 +208,9 @@ export default function Voice({ onAnalyze }: Props) {
           <p className="text-xs text-gray-400 dark:text-gray-500 mt-3">ⓘ 실시간 녹음 기능은 지원하지 않습니다.</p>
         </div>
 
-        {/* 프롬프트 */}
         <div className="border border-gray-200 dark:border-gray-700 rounded-xl p-5 flex flex-col bg-white dark:bg-[#1c1a1a]">
-          <h2 className="text-sm font-medium text-gray-800 dark:text-white mb-1">초기 분석 프롬프트</h2>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mb-3">AI가 분석 시 참고할 맥락이나 요청 사항을 입력하세요</p>
+          <h2 className="text-sm font-medium text-gray-800 dark:text-white mb-1">분석 요청사항</h2>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mb-3">AI가 분석 시 참고할 내용을 입력해주세요</p>
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
@@ -173,7 +224,6 @@ export default function Voice({ onAnalyze }: Props) {
         </div>
       </div>
 
-      {/* 파일 목록 */}
       <div className="border border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-[#1c1a1a]">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
           <div className="flex items-center gap-2">
@@ -182,7 +232,7 @@ export default function Voice({ onAnalyze }: Props) {
           </div>
         </div>
 
-        <div className="grid grid-cols-[2fr_1fr_1fr_1fr_120px] px-5 py-2 text-xs text-gray-400 dark:text-gray-500 border-b border-gray-100 dark:border-gray-700">
+        <div className="grid grid-cols-[2fr_1fr_1fr_1fr_160px] px-5 py-2 text-xs text-gray-400 dark:text-gray-500 border-b border-gray-100 dark:border-gray-700">
           <span>파일명</span>
           <span>길이</span>
           <span>크기</span>
@@ -197,7 +247,7 @@ export default function Voice({ onAnalyze }: Props) {
           </div>
         ) : (
           files.map((file) => (
-            <div key={file.id} className="grid grid-cols-[2fr_1fr_1fr_1fr_120px] items-center px-5 py-3.5 border-b border-gray-50 dark:border-gray-800 last:border-none hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors">
+            <div key={file.id} className="grid grid-cols-[2fr_1fr_1fr_1fr_160px] items-center px-5 py-3.5 border-b border-gray-50 dark:border-gray-800 last:border-none hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
                   <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -209,12 +259,27 @@ export default function Voice({ onAnalyze }: Props) {
               <span className="text-sm text-gray-600 dark:text-gray-400">{file.duration}</span>
               <span className="text-sm text-gray-600 dark:text-gray-400">{file.size}</span>
               <span className="text-sm text-gray-600 dark:text-gray-400">{file.uploadDate}</span>
-              <button
-                onClick={() => onAnalyze(file.id, file.sttResult)}
-                className="px-4 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
-              >
-                분석하기
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleAnalyze(file)}
+                  className="px-4 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                >
+                  분석결과
+                </button>
+                <button
+                  onClick={() => handleDelete(file)}
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                  aria-label="삭제"
+                >
+                  <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
+                    <polyline points="3 6 5 6 21 6"/>
+                    <path d="M19 6l-1 14H6L5 6"/>
+                    <path d="M10 11v6"/>
+                    <path d="M14 11v6"/>
+                    <path d="M9 6V4h6v2"/>
+                  </svg>
+                </button>
+              </div>
             </div>
           ))
         )}
