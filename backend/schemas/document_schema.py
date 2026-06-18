@@ -34,7 +34,7 @@ class DocumentMetadataSaveRequest(BaseModel):
     room_id: str = Field(..., min_length=1)        # 채팅방 ID
     filename: str = Field(..., min_length=1)       # 원본 파일명
 
-    type: Literal["document", "meeting", "voice"] = "document"  # 문서 유형
+    type: Literal["document", "meeting"] = "document"  # 문서 유형
 
     file_path: Optional[str] = None                # 8003 원본 파일 저장 경로
     json_path: Optional[str] = None                # 8003 JSON 저장 경로
