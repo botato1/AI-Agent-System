@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 
-const STT_URL = 'http://192.168.0.245:8001'
+const BASE_URL = import.meta.env.VITE_API_URL
 
 interface SttSegment {
   speaker: string
@@ -28,15 +28,18 @@ interface VoiceFile {
 
 interface Props {
   onAnalyze: (fileId: string, sttResult: SttResult) => void
+  onUploadStart?: (filename: string) => void
+  onUploadEnd?: () => void
 }
 
+// 초 → MM:SS 포맷 변환
 const formatDuration = (seconds: number) => {
   const m = Math.floor(seconds / 60).toString().padStart(2, '0')
   const s = Math.floor(seconds % 60).toString().padStart(2, '0')
   return `${m}:${s}`
 }
 
-export default function Voice({ onAnalyze }: Props) {
+export default function Voice({ onAnalyze, onUploadStart, onUploadEnd }: Props) {
   const [files, setFiles] = useState<VoiceFile[]>([])
   const [prompt, setPrompt] = useState('')
   const [isDragging, setIsDragging] = useState(false)
@@ -44,20 +47,24 @@ export default function Voice({ onAnalyze }: Props) {
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // 페이지 진입 시 8000 서버에서 음성 파일 목록 조회
   useEffect(() => {
-    fetch(`${STT_URL}/api/list`, { method: 'GET' })
+    fetch(`${BASE_URL}/api/stt/list`, { method: 'GET' })
       .then(r => r.json())
       .then(data => {
         if (data.status === 'success') {
           const loaded: VoiceFile[] = data.data.map((item: any) => ({
-            id: item.filename,
-            name: item.original_filename ?? item.filename,
-            duration: '--:--',
-            size: `${item.size_mb}MB`,
+            id: item.document_id,
+            name: item.filename ?? item.title,
+            // 목록 응답에서 duration_sec 바로 사용
+            duration: item.duration_sec ?
+              formatDuration(item.duration_sec) : '--:--',
+            size: '--',
             uploadDate: new Date(item.created_at).toLocaleString('ko-KR', {
               year: 'numeric', month: '2-digit', day: '2-digit',
               hour: '2-digit', minute: '2-digit',
             }),
+            // 목록 조회 시에는 sttResult 없음 → 분석하기 버튼으로 재조회
             sttResult: null,
           }))
           setFiles(loaded)
@@ -68,37 +75,41 @@ export default function Voice({ onAnalyze }: Props) {
 
   const handleUpload = async (selectedFile: File) => {
     setUploading(true)
+    onUploadStart?.(selectedFile.name)
     setUploadError(null)
 
     try {
+
+      // 2. 8000 서버로 STT 업로드 요청
+      // 8000이 내부적으로 8001 STT 서버 호출 후 DB 저장
       const formData = new FormData()
       formData.append('file', selectedFile)
       if (prompt) formData.append('topic', prompt)
 
-      console.log('파일 정보:', selectedFile.name, selectedFile.type, selectedFile.size)
-
-      const res = await fetch(`${STT_URL}/api/stt`, {
+      const res = await fetch(`${BASE_URL}/api/stt/upload`, {
         method: 'POST',
         body: formData,
       })
-      if (!res.ok) throw new Error('STT 분석 실패')
+      if (!res.ok) throw new Error('STT 업로드 실패')
       const data = await res.json()
-      if (data.status !== 'success') throw new Error(data.error ?? '분석 실패')
+      console.log('STT 업로드 응답:', data)
+      if (data.status !== 'success') throw new Error(data.error ?? '업로드 실패')
 
-      const { id, transcription, metadata } = data.data
-      console.log('duration_sec:', metadata?.duration_sec)
+      // 3. 업로드 응답에 transcription 바로 포함 → 재조회 불필요
+      const { document_id, filename, transcription, duration_sec } = data
 
       const sttResult: SttResult = {
-        file_id: id,
-        duration: metadata.duration_sec,
-        segments: transcription,
-        fileName: selectedFile.name,
+        file_id: document_id,
+        duration: duration_sec,
+        segments: transcription ?? [],
+        fileName: filename ?? selectedFile.name,
       }
 
+      // 4. 목록에 새 파일 추가
       const newFile: VoiceFile = {
-        id,
-        name: selectedFile.name,
-        duration: formatDuration(metadata.duration_sec),
+        id: document_id,
+        name: filename ?? selectedFile.name,
+        duration: formatDuration(duration_sec),
         size: `${(selectedFile.size / 1024 / 1024).toFixed(1)}MB`,
         uploadDate: new Date().toLocaleString('ko-KR', {
           year: 'numeric', month: '2-digit', day: '2-digit',
@@ -106,13 +117,17 @@ export default function Voice({ onAnalyze }: Props) {
         }),
         sttResult,
       }
+
       setFiles(prev => [newFile, ...prev])
-      onAnalyze(id, sttResult)
+
+      // 5. 바로 분석 결과 페이지로 이동
+      onAnalyze(document_id, sttResult)
 
     } catch (err: any) {
       setUploadError(err.message)
     } finally {
       setUploading(false)
+      onUploadEnd?.()
     }
   }
 
@@ -128,11 +143,11 @@ export default function Voice({ onAnalyze }: Props) {
     if (dropped) handleUpload(dropped)
   }
 
+  // 8000 서버로 삭제 요청 (8000이 내부적으로 8001도 삭제)
   const handleDelete = async (file: VoiceFile) => {
     if (!confirm('파일을 삭제할까요?')) return
-    const fileId = file.id.replace(/\.[^/.]+$/, '')
     try {
-      await fetch(`${STT_URL}/api/stt/${fileId}`, { method: 'DELETE' })
+      await fetch(`${BASE_URL}/api/stt/${file.id}`, { method: 'DELETE' })
       setFiles(prev => prev.filter(f => f.id !== file.id))
     } catch (err) {
       console.error('삭제 실패:', err)
@@ -140,22 +155,24 @@ export default function Voice({ onAnalyze }: Props) {
   }
 
   const handleAnalyze = async (file: VoiceFile) => {
+    // sttResult 있으면 바로 분석 결과 페이지로 이동
     if (file.sttResult) {
       onAnalyze(file.id, file.sttResult)
     } else {
-      const fileId = file.id.replace(/\.[^/.]+$/, '')
+      // sttResult 없으면 8000 서버에서 상세 조회 후 분석 결과 페이지로 이동
       try {
-        const res = await fetch(`${STT_URL}/api/stt/${fileId}`, { method: 'GET' })
+        const res = await fetch(`${BASE_URL}/api/stt/${file.id}`, { method: 'GET' })
         const data = await res.json()
         if (data.status === 'success') {
           const sttResult: SttResult = {
-            file_id: data.data.id,
-            duration: data.data.metadata.duration_sec,
+            file_id: data.data.document_id,
+            duration: data.data.duration_sec ?? data.data.metadata?.duration_sec,
             segments: data.data.transcription,
-            fileName: data.data.title ?? file.name,
+            fileName: data.data.filename ?? data.data.metadata?.original_filename ?? file.name,
           }
+          // 조회 결과를 목록에 캐시
           setFiles(prev => prev.map(f => f.id === file.id ? { ...f, sttResult } : f))
-          onAnalyze(fileId, sttResult)
+          onAnalyze(file.id, sttResult)
         }
       } catch (err) {
         console.error('조회 실패:', err)
@@ -171,6 +188,7 @@ export default function Voice({ onAnalyze }: Props) {
       </div>
 
       <div className="grid grid-cols-2 gap-4 mb-4">
+        {/* 업로드 영역 */}
         <div
           onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
           onDragLeave={() => setIsDragging(false)}
@@ -208,13 +226,14 @@ export default function Voice({ onAnalyze }: Props) {
           <p className="text-xs text-gray-400 dark:text-gray-500 mt-3">ⓘ 실시간 녹음 기능은 지원하지 않습니다.</p>
         </div>
 
+        {/* 분석 요청사항 입력 */}
         <div className="border border-gray-200 dark:border-gray-700 rounded-xl p-5 flex flex-col bg-white dark:bg-[#1c1a1a]">
           <h2 className="text-sm font-medium text-gray-800 dark:text-white mb-1">분석 요청사항</h2>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mb-3">AI가 분석 시 참고할 내용을 입력해주세요</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mb-3">AI가 집중해서 분석할 내용을 입력하세요</p>
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="예) 이 회의에서 결정된 액션 아이템과 담당자를 중심으로 요약해줘."
+            placeholder="예) 할 일과 담당자 위주로 정리해줘"
             className="flex-1 resize-none text-sm bg-gray-50 dark:bg-[#161616] border border-gray-200 dark:border-gray-700 rounded-lg p-3 text-gray-700 dark:text-gray-300 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 min-h-[120px]"
           />
           <div className="flex justify-end gap-2 mt-3">
@@ -224,6 +243,7 @@ export default function Voice({ onAnalyze }: Props) {
         </div>
       </div>
 
+      {/* 업로드된 파일 목록 */}
       <div className="border border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-[#1c1a1a]">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
           <div className="flex items-center gap-2">
@@ -232,6 +252,7 @@ export default function Voice({ onAnalyze }: Props) {
           </div>
         </div>
 
+        {/* 테이블 헤더 */}
         <div className="grid grid-cols-[2fr_1fr_1fr_1fr_160px] px-5 py-2 text-xs text-gray-400 dark:text-gray-500 border-b border-gray-100 dark:border-gray-700">
           <span>파일명</span>
           <span>길이</span>
@@ -260,12 +281,14 @@ export default function Voice({ onAnalyze }: Props) {
               <span className="text-sm text-gray-600 dark:text-gray-400">{file.size}</span>
               <span className="text-sm text-gray-600 dark:text-gray-400">{file.uploadDate}</span>
               <div className="flex items-center gap-2">
+                {/* sttResult 있으면 분석 결과 보기, 없으면 재조회 후 이동 */}
                 <button
                   onClick={() => handleAnalyze(file)}
                   className="px-4 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
                 >
-                  분석결과
+                  {file.sttResult ? '분석 결과 보기' : '분석하기'}
                 </button>
+                {/* 8000 → 8001 순서로 삭제 */}
                 <button
                   onClick={() => handleDelete(file)}
                   className="w-7 h-7 flex items-center justify-center rounded-lg text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
