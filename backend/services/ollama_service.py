@@ -258,9 +258,12 @@ class OllamaService:
         rag_context: str | None = None,
         memory_context: str | None = None,
         tasks: list | None = None,
+        retrieved_docs: list | None = None,
+        low_confidence: bool = False,
     ) -> str:
         safe_rag_context = rag_context or ""
         safe_memory_context = memory_context or ""
+        safe_retrieved_docs = retrieved_docs or []
 
         # STT 전사처럼 긴 문서는 모델 context 초과를 막기 위해 길이 제한
         if len(safe_rag_context) > 12000:
@@ -276,6 +279,8 @@ class OllamaService:
             rag_context=safe_rag_context,
             memory_context=safe_memory_context,
             tasks=tasks or [],
+            retrieved_docs=safe_retrieved_docs,
+            low_confidence=low_confidence,
         )
 
     @staticmethod
