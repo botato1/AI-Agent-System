@@ -73,8 +73,18 @@ def _chunk_document(chunks: list) -> list[dict]:
         result.append({"content": content, "page_number": page})
 
     for chunk in chunks:
-        style = chunk.get("metadata", {}).get("style", "body")
-        content = chunk.get("content", "").strip()
+        # 8003 응답은 chunk["style"] 직접, 기존 포맷은 chunk["metadata"]["style"]
+        style = (
+            chunk.get("metadata", {}).get("style")
+            or chunk.get("style")
+            or "body"
+        )
+        # 8003 응답은 chunk["text"], 기존 포맷은 chunk["content"]
+        content = (
+            chunk.get("content")
+            or chunk.get("text")
+            or ""
+        ).strip()
         page = chunk.get("page_number", 1)
 
         if not content:
@@ -278,6 +288,13 @@ def load_document(document_id: str, room_id: str = "") -> dict:
     upload_context = _get_upload_context(doc_type)
     base_meta = _build_base_meta(doc, room_id)
 
+    # db_record 값으로 보완 (document_id는 반드시 SQLite documents.id와 일치)
+    base_meta["document_id"] = db_record.get("id", base_meta["document_id"])
+    base_meta["title"]       = db_record.get("title", base_meta["title"])
+    base_meta["filename"]    = db_record.get("title", base_meta["filename"])
+    base_meta["type"]        = db_record.get("type", base_meta["type"])
+    base_meta["source"]      = db_record.get("source", base_meta["source"])
+
     try:
         if doc_type == "voice":
             return _load_voice(doc, base_meta, upload_context)
@@ -322,6 +339,9 @@ def _load_text_document(doc: dict, base_meta: dict, upload_context: str) -> dict
             "page_number": chunk.get("page_number", 1),
             "upload_context": upload_context,
             "chroma_id": chunk_id,
+            # rag_filter = {"document_id": document_id} 로 검색할 때
+            # SQLite documents.id와 반드시 일치해야 함
+            "document_id": base_meta["document_id"],
         }
         insert_document({
             "id":      chunk_id,
