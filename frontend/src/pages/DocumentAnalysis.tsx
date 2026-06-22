@@ -1,0 +1,149 @@
+// 문서 분석 결과 페이지
+import { Document, Packer, Paragraph, TextRun, HeadingLevel } from 'docx'
+import { saveAs } from 'file-saver'
+import { jsPDF } from 'jspdf'
+
+import { NanumGothicBase64 } from '../fonts/NanumGothic'
+import { useToast } from '../App'
+
+import { useState } from 'react'
+
+import { ArrowLeft, Download, Share2 } from 'lucide-react'
+
+import TabSummary from '../components/DocumentAnalysis/TabSummary'
+import TabOriginal from '../components/DocumentAnalysis/TabOriginal'
+import ConfidenceBar from '../components/shared/ConfidenceBar'
+import TabTasks from '../components/DocumentAnalysis/TabTasks'
+import TabRelated from '../components/DocumentAnalysis/TabRelated'
+
+const tabs = ['요약', '전체 문서', 'Task', '연관 문서']
+
+interface AnalysisProps {
+  analysisData?: any
+  onReview: () => void
+  onGoToChat?: () => void
+  onBack?: () => void
+}
+
+export default function Analysis({ analysisData, onReview, onGoToChat, onBack }: AnalysisProps) {
+  const { showToast } = useToast()
+  const [activeTab, setActiveTab] = useState(0) //활성화 탭 기본은 요약 탭
+
+  //PDF 다운로드 jsPDF+나눔고딕
+  const handleDownload = () => {
+    const doc = new jsPDF()
+    doc.addFileToVFS('NanumGothic.ttf', NanumGothicBase64)
+    doc.addFont('NanumGothic.ttf', 'NanumGothic', 'normal')
+    doc.setFont('NanumGothic')
+    doc.setFontSize(18)
+    doc.text('마케팅 전략 회의 분석 보고서', 20, 20)
+    doc.setFontSize(11)
+    doc.text('회의 일시: 2024.05.20 (월) 14:00', 20, 35)
+    doc.text('회의 시간: 1시간 32분', 20, 43)
+    doc.save('마케팅전략회의_분석보고서.pdf')
+  }
+
+  // DOCX 다운로드: docx 라이브러리로 Word 문서 생성
+  const handleDownloadDocx = async () => {
+     const doc = new Document({
+      sections: [{
+        children: [
+          new Paragraph({
+            text: '마케팅 전략 회의 분석 보고서',
+            heading: HeadingLevel.HEADING_1
+          }),
+          new Paragraph({
+            children: [
+              new TextRun({ text: '회의 일시: 2024.05.20 (월) 14:00', size: 22 })
+            ]
+          }),
+        ]
+      }]
+    })
+    const blob = await Packer.toBlob(doc) // 문서를 Blob으로 변환 
+    saveAs(blob, '마케팅전략회의_분석보고서.docx')
+  }
+
+  //TXT 다운로드
+  const handleDownloadTxt = () => {
+    const content = `마케팅 전략 회의 분석 보고서\n회의 일시: 2024.05.20 (월) 14:00`
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+    saveAs(blob, '마케팅전략회의_분석보고서.txt')
+  }
+
+  //공유 (현재 페이지 url 복사)
+  const handleShare = () => {
+    navigator.clipboard.writeText(window.location.href)
+    showToast('링크가 복사됐어요')
+  }
+
+  //activeTab 인덱스에 따라 탭 컴포넌트 변경
+const renderTab = () => {
+  switch (activeTab) {
+    case 0: return <TabSummary analysisData={analysisData}/>
+    case 1: return <TabOriginal analysisData={analysisData}/>
+    case 2: return <TabTasks />
+    case 3: return <TabRelated />
+    default: return <TabSummary />
+  }
+}
+
+  return (
+    <div id="analysis-content">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <button onClick={onBack} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+            <ArrowLeft size={16} className="text-gray-500 dark:text-gray-400" />
+          </button>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-bold text-gray-800 dark:text-white">
+                {analysisData?.title ?? '마케팅 전략 회의'}
+              </h1>
+              <span className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 px-2 py-0.5 rounded-full font-medium">분석 완료</span>
+            </div>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {analysisData?.created_at
+              ? new Date(analysisData.created_at).toLocaleDateString('ko-KR')
+              : '2024.05.20 (월) 14:00'}
+            </p>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={handleDownload} className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700">
+            <Download size={13} /> PDF
+          </button>
+          <button onClick={handleDownloadDocx} className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700">
+            <Download size={13} /> DOCX
+          </button>
+          <button onClick={handleDownloadTxt} className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700">
+            <Download size={13} /> TXT
+          </button>
+          <button onClick={handleShare} className="flex items-center gap-1.5 text-xs text-white bg-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-700">
+            <Share2 size={13} /> 공유하기
+          </button>
+          <button onClick={onGoToChat} className="flex items-center gap-1.5 text-xs text-white bg-green-600 px-3 py-1.5 rounded-lg hover:bg-green-700">
+          채팅 →
+          </button>
+        </div>
+      </div>
+      {/*신뢰도 바 , 검토 버튼*/}
+      <ConfidenceBar confidence={72} onReview={onReview} />
+
+      <div className="flex gap-1 mb-6 border-b border-gray-100 dark:border-gray-700">
+        {tabs.map((tab, i) => (
+          <button
+            key={i}
+            onClick={() => setActiveTab(i)}
+            //활성/비활성 탭
+            className={`text-sm px-4 py-2 border-b-2 transition ${activeTab === i ? 'border-blue-600 text-blue-600 font-medium' : 'border-transparent text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+      {/*선택된 탭 렌더링*/ }
+      {renderTab()}
+    </div>
+  )
+}
