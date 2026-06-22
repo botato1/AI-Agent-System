@@ -15,6 +15,8 @@ class AgentState(TypedDict):
     # 3. 이전 대화 / RAG 검색 결과
     memory_context: Optional[str]
     rag_context: Optional[str]
+    retrieved_docs: List[dict]
+    low_confidence: bool
     sources: List[dict]
 
     target_document_id: Optional[str]
