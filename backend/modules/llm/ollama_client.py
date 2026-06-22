@@ -173,13 +173,12 @@ def generate_answer(user_input: str, context: str = "") -> str:
     return response_text
 
 
-# ── 내부 유틸: 낮은 신뢰도 결과 안내 문구 생성 ──────────────────
+# ── 내부 유틸 ────────────────────────────────────────────────
+
 def _format_low_confidence_notice(retrieved_docs: list) -> str:
     """
     low_confidence=True일 때 사용자에게 보여줄 안내 문구.
-    "관련 문서를 찾을 수 없습니다" + 낮은 유사도로 검색된 문서명과 점수 목록.
-    retrieved_docs는 rag_service.retrieve_relevant_knowledge()의 data 리스트
-    (각 항목에 title, score 키를 가지고 있다고 가정).
+    retrieved_docs: rag_service의 data 리스트 (title, score 키 포함).
     """
     if not retrieved_docs:
         return "관련 문서를 찾을 수 없습니다."
@@ -189,8 +188,204 @@ def _format_low_confidence_notice(retrieved_docs: list) -> str:
         title = doc.get("title", "제목 없음")
         score = doc.get("score", 0)
         lines.append(f"- {title} (유사도 {score:.4f})")
-
     return "\n".join(lines)
+
+
+def _build_context_from_docs(docs: list, max_chars: int = 6000) -> str:
+    """문서 리스트를 LLM에 넘길 컨텍스트 문자열로 변환."""
+    parts = []
+    for doc in docs:
+        title = doc.get("title", "제목 없음")
+        content = doc.get("content", "")
+        parts.append(f"[{title}]\n{content}")
+    return "\n\n".join(parts)[:max_chars]
+
+
+def _call_ollama(prompt: str, timeout: float = 150.0) -> str:
+    """Ollama 단일 호출 + 중국어 감지 재시도."""
+    response = httpx.post(
+        f"{OLLAMA_BASE_URL}/api/generate",
+        json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
+        timeout=timeout,
+    )
+    text = response.json().get("response", "답변 생성 실패").strip()
+    if has_chinese(text):
+        response = httpx.post(
+            f"{OLLAMA_BASE_URL}/api/generate",
+            json={"model": OLLAMA_MODEL, "prompt": prompt + "\n반드시 한국어로만 답하세요.", "stream": False},
+            timeout=timeout,
+        )
+        text = response.json().get("response", "답변 생성 실패").strip()
+    return text
+
+
+def _answer_knowledge_search(
+    user_message: str,
+    rag_search_result: dict,
+) -> str:
+    """
+    knowledge_search 타입 + rag_search_result(컬렉션별 분리 결과)가 있을 때
+    4가지 경우로 분기해서 프롬프트를 구성하고 LLM을 호출한다.
+
+    [분기 기준]
+    - meeting 찾음: collection_results["meeting"]["count"] > 0
+                    AND NOT collection_results["meeting"]["low_confidence"]
+    - knowledge 찾음: collection_results["knowledge"]["count"] > 0
+                      AND NOT collection_results["knowledge"]["low_confidence"]
+
+    [분기 1] meeting O + knowledge O
+    → 회의록 내용 기반으로 답변, 지식 문서로 보충
+
+    [분기 2] meeting O + knowledge X
+    → 회의록 내용만으로 답변
+
+    [분기 3] meeting X + knowledge O
+    → "회의록은 찾지 못했습니다" 안내 후 지식 문서로 설명
+
+    [분기 4] meeting X + knowledge X
+    → "관련 내용을 찾지 못했습니다" 안내 + 가능하면 일반 지식으로 보충
+    """
+    cr = rag_search_result.get("collection_results", {})
+    searched = rag_search_result.get("searched_collections", [])
+
+    meeting_cr   = cr.get("meeting",  {"count": 0, "low_confidence": True, "data": []})
+    knowledge_cr = cr.get("knowledge", {"count": 0, "low_confidence": True, "data": []})
+
+    meeting_found        = meeting_cr["count"]  > 0 and not meeting_cr["low_confidence"]
+    knowledge_found      = knowledge_cr["count"] > 0 and not knowledge_cr["low_confidence"]
+    # 실제로 meeting_collection을 검색 대상으로 선택했는지 여부
+    # → 회의 관련 신호어가 있는 질문에서만 True
+    meeting_was_searched = "meeting" in searched
+
+    meeting_context  = _build_context_from_docs(meeting_cr.get("data", []))
+    knowledge_context = _build_context_from_docs(knowledge_cr.get("data", []))
+
+    # ── 분기 1: 둘 다 찾음 ───────────────────────────────────
+    if meeting_found and knowledge_found:
+        prompt = f"""[INST]
+{DOBY_SYSTEM_GUIDE}
+
+[회의록 내용]
+{meeting_context}
+
+[관련 기술 문서]
+{knowledge_context}
+
+[사용자 질문]
+{user_message}
+
+[답변 규칙]
+- 먼저 회의록에서 찾은 관련 내용을 요약해서 답하세요.
+- 그 다음, 관련 기술 문서를 바탕으로 구체적인 해결 방법이나 추가 설명을 이어서 제공하세요.
+- 각 출처(회의록 / 기술 문서)를 구분해서 명확히 표시하세요.
+- 인사말 없이 바로 답변하세요.
+- 답변은 한국어로 작성하세요.
+[/INST]"""
+        return _call_ollama(prompt)
+
+    # ── 분기 2: 회의록만 찾음 ────────────────────────────────
+    if meeting_found and not knowledge_found:
+        prompt = f"""[INST]
+{DOBY_SYSTEM_GUIDE}
+
+[회의록 내용]
+{meeting_context}
+
+[사용자 질문]
+{user_message}
+
+[답변 규칙]
+- 회의록 내용만을 근거로 답하세요.
+- 회의록에 없는 내용은 추측하지 마세요.
+- 인사말 없이 바로 답변하세요.
+- 답변은 한국어로 작성하세요.
+[/INST]"""
+        return _call_ollama(prompt)
+
+    # ── 분기 3a: 순수 기술 질문 (meeting 검색 안 함 + knowledge 찾음) ─
+    # meeting_was_searched=False면 처음부터 회의 의도가 없는 질문이므로
+    # 회의록 언급 없이 바로 기술 문서 기반으로 답변
+    if not meeting_was_searched and knowledge_found:
+        prompt = f"""[INST]
+{DOBY_SYSTEM_GUIDE}
+
+아래 [참고 내용]은 사용자 질문과 관련된 기술 문서입니다.
+[참고 내용]이 비어 있지 않다면 절대 "참고 문서가 없다"고 말하지 마세요.
+
+[참고 내용]
+{knowledge_context}
+
+[사용자 질문]
+{user_message}
+
+[답변 규칙]
+- 반드시 [참고 내용]만 근거로 답하세요.
+- 참고 내용에 없는 정보는 추측하지 마세요.
+- 사용자가 요약을 요청하면 핵심 내용을 한국어로 정리하세요.
+- 인사말 없이 바로 답변하세요.
+- 답변은 한국어로 작성하세요.
+[/INST]"""
+        return _call_ollama(prompt)
+
+    # ── 분기 3b: 회의록 검색 시도했지만 못 찾음 + knowledge 찾음 ──
+    if not meeting_found and knowledge_found and meeting_was_searched:
+        meeting_notice = ""
+        if meeting_cr["count"] > 0:
+            # 회의록을 검색했지만 유사도가 낮아 못 찾은 경우 → 목록 안내
+            titles = [d.get("title", "제목 없음") for d in meeting_cr.get("data", [])[:3]]
+            meeting_notice = f"관련 회의록을 찾지 못했습니다. (낮은 유사도로 검색된 회의록: {', '.join(titles)})"
+        else:
+            # 회의록 컬렉션 자체에 데이터가 없는 경우
+            meeting_notice = "등록된 회의록이 없습니다."
+
+        prompt = f"""[INST]
+{DOBY_SYSTEM_GUIDE}
+
+[관련 기술 문서]
+{knowledge_context}
+
+[사용자 질문]
+{user_message}
+
+[답변 규칙]
+- 먼저 "{meeting_notice}"라고 자연스럽게 안내하세요.
+- 그 다음, 관련 기술 문서를 바탕으로 질문에 답하세요.
+- 기술 문서에 없는 내용은 추측하지 마세요.
+- 인사말 없이 바로 답변하세요.
+- 답변은 한국어로 작성하세요.
+[/INST]"""
+        return _call_ollama(prompt)
+
+    # ── 분기 4: 둘 다 못 찾음 (또는 meeting 검색 안 한 케이스) ──
+    # 도비는 크롤링/업로드된 문서 기반 AI 비서이므로,
+    # 관련 문서를 찾지 못한 경우 일반 지식으로 추측해서 답하지 않음.
+    # 키워드 보강 또는 파인튜닝으로 검색 정확도를 올리는 방향으로 개선 예정.
+    all_docs = rag_search_result.get("data", [])
+
+    if meeting_was_searched and all_docs:
+        # 회의록 검색 시도했지만 둘 다 낮은 신뢰도 → 회의록 관련 안내 포함
+        doc_list = "\n".join(
+            f"- {d.get('title', '제목 없음')} (유사도 {d.get('score', 0):.4f})"
+            for d in all_docs[:5]
+        )
+        return (
+            f"관련 회의록과 기술 문서 모두에서 충분한 정보를 찾지 못했습니다.\n"
+            f"낮은 유사도로 검색된 문서 {len(all_docs[:5])}개:\n{doc_list}\n\n"
+            f"관련 문서가 등록되어 있는지 확인하거나, 질문을 더 구체적으로 입력해 주세요."
+        )
+    elif all_docs:
+        # 순수 기술 질문인데 신뢰도 낮음 → 기술 문서 관련 안내
+        doc_list = "\n".join(
+            f"- {d.get('title', '제목 없음')} (유사도 {d.get('score', 0):.4f})"
+            for d in all_docs[:5]
+        )
+        return (
+            f"관련 기술 문서에서 충분한 정보를 찾지 못했습니다.\n"
+            f"낮은 유사도로 검색된 문서 {len(all_docs[:5])}개:\n{doc_list}\n\n"
+            f"관련 문서가 등록되어 있는지 확인하거나, 질문을 더 구체적으로 입력해 주세요."
+        )
+    else:
+        return "관련 문서를 찾지 못했습니다. 질문을 더 구체적으로 입력하거나 관련 문서를 먼저 업로드해 주세요."
 
 
 # ── 흐름별 답변 생성 ──────────────────────────────────────────
@@ -202,6 +397,7 @@ def generate_answer_for_graph(
     tasks: list = None,
     low_confidence: bool = False,
     retrieved_docs: list = None,
+    rag_search_result: dict = None,
 ) -> str:
     """
     question_type에 따라 프롬프트 자동 구성 후 LLM 호출.
@@ -240,64 +436,20 @@ def generate_answer_for_graph(
     memory_context = memory_context or ""
     retrieved_docs = retrieved_docs or []
 
-    # ── knowledge_search: 직접 Ollama 호출 (이중 래핑 제거) ──
+    # ── knowledge_search ─────────────────────────────────────
     if question_type == "knowledge_search":
+
+        # 유형 2: rag_search_result가 있으면 컬렉션별 분리 분기 처리
+        # (팀원이 rag_node에서 rag_service 결과를 그대로 state에 담아 넘겨줄 때)
+        if rag_search_result:
+            return _answer_knowledge_search(user_message, rag_search_result)
+
+        # 유형 1: target_document_id로 문서를 직접 조회한 경우 (기존 로직 유지)
+        # rag_context는 SQLite documents 테이블의 content_markdown 전체
         if not rag_context.strip():
             return "참고할 문서 내용을 찾지 못했습니다. 문서가 정상적으로 업로드되었는지 확인해 주세요."
 
-        if low_confidence:
-            # 관련 문서를 찾지 못한 경우: 안내 문구 + (가능하면) 일반 지식 기반 설명
-            low_confidence_notice = _format_low_confidence_notice(retrieved_docs)
-
-            # STT 전사처럼 너무 긴 컨텍스트는 잘라서 전달
-            trimmed_context = rag_context[:12000]
-
-            prompt = f"""[INST]
-{DOBY_SYSTEM_GUIDE}
-
-아래 [참고 내용]은 사용자 질문과 유사도가 낮아 신뢰도가 떨어지는 검색 결과입니다.
-
-[참고 내용 (낮은 신뢰도)]
-{trimmed_context}
-
-[사용자 질문]
-{user_message}
-
-[답변 규칙]
-- 먼저 "{low_confidence_notice}" 내용을 한국어로 자연스럽게 안내하세요.
-- 그 다음, 질문이 일반적인 기술 지식으로 답변 가능한 내용이라면 [참고 내용]에
-  의존하지 말고 알고 있는 일반 지식으로 해결 방법을 설명하세요.
-- 일반 지식으로도 답하기 어려운 질문이면 안내 문구만 전달하고 추측하지 마세요.
-- 인사말 없이 바로 답변하세요.
-- 답변은 한국어로 작성하세요.
-[/INST]"""
-
-            response = httpx.post(
-                f"{OLLAMA_BASE_URL}/api/generate",
-                json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
-                timeout=120.0,
-            )
-            result = response.json()
-            response_text = result.get("response", "답변 생성 실패").strip()
-
-            if has_chinese(response_text):
-                response = httpx.post(
-                    f"{OLLAMA_BASE_URL}/api/generate",
-                    json={
-                        "model": OLLAMA_MODEL,
-                        "prompt": prompt + "\n반드시 한국어로만 다시 답하세요.",
-                        "stream": False,
-                    },
-                    timeout=120.0,
-                )
-                result = response.json()
-                response_text = result.get("response", "답변 생성 실패").strip()
-
-            return response_text
-
-        # 신뢰도가 충분한 경우: 기존 로직 그대로
         trimmed_context = rag_context[:12000]
-
         prompt = f"""[INST]
 {DOBY_SYSTEM_GUIDE}
 
@@ -317,29 +469,7 @@ def generate_answer_for_graph(
 - 인사말 없이 바로 답변하세요.
 - 답변은 한국어로 작성하세요.
 [/INST]"""
-
-        response = httpx.post(
-            f"{OLLAMA_BASE_URL}/api/generate",
-            json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
-            timeout=120.0,
-        )
-        result = response.json()
-        response_text = result.get("response", "답변 생성 실패").strip()
-
-        if has_chinese(response_text):
-            response = httpx.post(
-                f"{OLLAMA_BASE_URL}/api/generate",
-                json={
-                    "model": OLLAMA_MODEL,
-                    "prompt": prompt + "\n반드시 한국어로만 다시 답하세요.",
-                    "stream": False,
-                },
-                timeout=120.0,
-            )
-            result = response.json()
-            response_text = result.get("response", "답변 생성 실패").strip()
-
-        return response_text
+        return _call_ollama(prompt)
 
     # ── task_from_rag / task_from_memory ──
     if question_type in ("task_from_rag", "task_from_memory") and tasks:
