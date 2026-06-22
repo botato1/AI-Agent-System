@@ -171,6 +171,17 @@ def _get_reranker():
         print("[reranker] 로딩 완료")
     return _reranker
 
+# [추가] 서비스 초기화 시점에 호출할 Warm-up 함수
+def warm_up_reranker():
+    """앱 구동 시 리랭커를 메모리에 미리 올려 첫 쿼리 타임아웃을 방지합니다."""
+    try:
+        print("[reranker] 초기화 워밍업 시작...")
+        reranker = _get_reranker()
+        # 가벼운 더미 데이터로 강제 추론 구동
+        reranker.compute_score([["init", "warm up"]], normalize=True)
+        print("[reranker] 초기화 워밍업 완료.")
+    except Exception as e:
+        print(f"[reranker 워밍업 실패]: {e}")
 
 def rerank_results(query_text: str, results: list[dict]) -> list[dict]:
     """
