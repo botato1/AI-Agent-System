@@ -7,14 +7,63 @@ from backend.schemas.response_schema import ChatResponseSchema
 from backend.schemas.agent_schema import AgentState
 from backend.db.crud import (
     insert_message,
+    get_messages,
     get_latest_document_by_conversation,
     get_document_by_filename_and_conversation,
 )
 from backend.graphs.agent_graph import agent_graph
 
 
+# 사용자가 특정 문서/파일/음성/회의록을 가리키는 질문인지 확인하는 함수
+def is_document_reference_message(message: str) -> bool:
+    if not message:
+        return False
+
+    keywords = [
+        "이 문서", "이 파일", "이 자료", "이 회의록", "이 음성",
+        "방금 올린", "방금 업로드", "첨부한", "업로드한",
+        "문서에서", "파일에서", "자료에서", "회의록에서", "음성에서",
+        "해당 문서", "해당 파일", "해당 자료", "해당 회의록", "해당 음성",
+    ]
+
+    return any(keyword in message for keyword in keywords)
+
+
+# DB에서 가져온 메시지를 AgentState에서 쓰기 좋은 dict 리스트로 정리
+def normalize_messages_for_state(messages: list | None) -> list[dict]:
+    if not messages:
+        return []
+
+    normalized_messages = []
+
+    for message in messages:
+        # 이미 dict 형태인 경우
+        if isinstance(message, dict):
+            normalized_messages.append({
+                "role": message.get("role"),
+                "content": message.get("content"),
+                "created_at": message.get("created_at"),
+            })
+
+        # sqlite3.Row 같은 객체인 경우
+        else:
+            try:
+                normalized_messages.append({
+                    "role": message["role"],
+                    "content": message["content"],
+                    "created_at": message["created_at"] if "created_at" in message.keys() else None,
+                })
+            except Exception:
+                continue
+
+    return normalized_messages
+
+
 # ChatRequest를 LangGraph에서 사용할 AgentState로 변환하는 함수
-def create_initial_state(request: ChatRequest) -> AgentState:
+def create_initial_state(
+    request: ChatRequest,
+    messages: list | None = None
+) -> AgentState:
     # 1. 프론트에서 넘어온 문서 정보
     target_document_id = request.target_document_id
     target_filename = request.target_filename
@@ -32,8 +81,13 @@ def create_initial_state(request: ChatRequest) -> AgentState:
             target_filename = matched_document.get("title")
 
     # 3. target_document_id와 target_filename이 둘 다 없는 경우
-    #    현재 채팅방(room_id)에 가장 최근 업로드된 문서를 DB에서 조회한다.
-    if not target_document_id and not target_filename:
+    #    사용자가 특정 문서/파일/음성/회의록을 가리킬 때만 최근 업로드 문서를 자동 연결한다.
+    #    일반 지식 검색 질문이 최근 문서 필터에 묶이는 문제를 방지한다.
+    if (
+        not target_document_id
+        and not target_filename
+        and is_document_reference_message(request.content)
+    ):
         latest_document = get_latest_document_by_conversation(request.room_id)
 
         if latest_document:
@@ -56,7 +110,11 @@ def create_initial_state(request: ChatRequest) -> AgentState:
         "user_message": request.content,
         "source": request.source,
         "created_at": datetime.now(ZoneInfo("Asia/Seoul")).isoformat(),
-        "messages": [],
+
+        # 이전 대화 기록
+        # "방금 추출한 할 일 목록을 노션에 저장해줘" 같은 요청에서
+        # notion_node가 직전 assistant 답변을 찾기 위해 사용한다.
+        "messages": normalize_messages_for_state(messages),
 
         # 2. 문서 / STT / 파일 처리 결과
         "document_json": None,
@@ -64,10 +122,12 @@ def create_initial_state(request: ChatRequest) -> AgentState:
         # 3. 이전 대화 / RAG 검색 결과
         "memory_context": None,
         "rag_context": None,
+        "retrieved_docs": [],
+        "low_confidence": False,
         "sources": [],
 
         # 프론트에서 선택한 문서 검색용 필드
-        # 프론트가 document_id를 안 보내도 filename 또는 room_id 기준으로 자동 보완됨
+        # 프론트가 document_id를 안 보내도 filename 또는 문서 지시어 기준으로 자동 보완됨
         "target_document_id": target_document_id,
         "target_filename": target_filename,
         "rag_filter": rag_filter,
@@ -147,7 +207,6 @@ def normalize_task_status(status: str | None) -> str:
     status = str(status).strip()
 
     status_map = {
-        # todo
         "todo": "todo",
         "할일": "todo",
         "할 일": "todo",
@@ -157,7 +216,6 @@ def normalize_task_status(status: str | None) -> str:
         "해야함": "todo",
         "해야 함": "todo",
 
-        # in_progress
         "in_progress": "in_progress",
         "doing": "in_progress",
         "진행중": "in_progress",
@@ -166,7 +224,6 @@ def normalize_task_status(status: str | None) -> str:
         "작업중": "in_progress",
         "작업 중": "in_progress",
 
-        # done
         "done": "done",
         "완료": "done",
         "끝남": "done",
@@ -174,7 +231,6 @@ def normalize_task_status(status: str | None) -> str:
         "처리완료": "done",
         "처리 완료": "done",
 
-        # delayed
         "delayed": "delayed",
         "지연": "delayed",
         "연기": "delayed",
@@ -291,6 +347,8 @@ def build_chat_response(state: AgentState) -> ChatResponseSchema:
     raw_tasks = state.get("tasks", [])
     tasks = normalize_tasks(raw_tasks)
 
+    retrieved_docs = state.get("retrieved_docs") or []
+
     return ChatResponseSchema(
         room_id=state.get("room_id", ""),
         answer=state.get("final_answer") or "",
@@ -309,6 +367,8 @@ def build_chat_response(state: AgentState) -> ChatResponseSchema:
             "target_document_id": state.get("target_document_id"),
             "target_filename": state.get("target_filename"),
             "rag_filter": state.get("rag_filter"),
+            "low_confidence": state.get("low_confidence"),
+            "retrieved_docs_count": len(retrieved_docs),
         },
         error=state.get("error"),
     )
@@ -327,22 +387,26 @@ async def handle_chat(request: ChatRequest) -> ChatResponseSchema:
         content=request.content
     )
 
-    # 2. ChatRequest를 AgentState로 변환
-    state = create_initial_state(request)
+    # 2. 현재 채팅방의 대화 기록 조회
+    # 방금 저장한 user 메시지와 이전 assistant 답변이 함께 들어온다.
+    messages = get_messages(request.room_id)
 
-    # 3. LangGraph 실행
-    # FastAPI async event loop와 rag_node 내부 asyncio.run() 충돌 방지
+    # 3. ChatRequest를 AgentState로 변환
+    state = create_initial_state(request, messages=messages)
+
+    # 4. LangGraph 실행
+    # FastAPI async event loop와 그래프 내부 동기 작업 충돌 방지
     result_state = await asyncio.to_thread(run_agent_graph, state)
 
-    # 4. 최종 답변 추출
+    # 5. 최종 답변 추출
     answer = result_state.get("final_answer") or "응답을 생성하지 못했습니다."
 
-    # 5. assistant 답변 DB 저장
+    # 6. assistant 답변 DB 저장
     insert_message(
         conversation_id=request.room_id,
         role="assistant",
         content=answer
     )
 
-    # 6. 최종 응답 반환
+    # 7. 최종 응답 반환
     return build_chat_response(result_state)
