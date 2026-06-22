@@ -6,11 +6,19 @@ from pathlib import Path
 from fastapi import UploadFile
 import httpx
 
-from backend.db.crud import ensure_conversation, save_document_metadata
+from backend.db.crud import (
+    ensure_conversation,
+    save_document_metadata,
+    get_document_by_id,
+    delete_document,
+    delete_document_chunks,
+)
 from backend.modules.rag.document_loader import load_document
 
 
 # 문서 처리 서버 8003
+# 업로드: POST   /api/document
+# 삭제:   DELETE /api/document/{document_id}
 DOCUMENT_PROCESS_URL = os.getenv(
     "DOCUMENT_PROCESS_URL",
     "http://220.90.180.93:8003/api/document"
@@ -92,16 +100,101 @@ def _build_error_response(
     }
 
 
+def _safe_delete_local_file(file_path: str) -> bool:
+    """
+    8000 서버에서 접근 가능한 로컬 파일이면 삭제한다.
+
+    8003 서버의 Windows 경로처럼 현재 서버에서 접근할 수 없는 경로는
+    exists()가 False가 되므로 삭제하지 않고 False를 반환한다.
+    """
+    if not file_path:
+        return False
+
+    try:
+        path = Path(file_path)
+
+        if path.exists() and path.is_file():
+            path.unlink()
+            return True
+
+    except Exception as e:
+        print(f"[document_service] 로컬 파일 삭제 실패: {file_path} / {repr(e)}")
+
+    return False
+
+# 8003 문서 처리 서버에 원본 문서 파일 및 처리 결과 JSON 삭제를 요청
+def _delete_document_from_8003(document_id: str) -> dict:
+    delete_url = f"{DOCUMENT_PROCESS_URL.rstrip('/')}/{document_id}"
+
+    try:
+        with httpx.Client(timeout=60.0) as client:
+            response = client.delete(delete_url)
+
+        try:
+            response_data = response.json()
+        except Exception:
+            response_data = {
+                "status": "error",
+                "message": "8003 삭제 응답을 JSON으로 파싱할 수 없습니다.",
+                "document_id": document_id,
+                "deleted": {
+                    "file": False,
+                    "json": False,
+                },
+                "error": response.text,
+            }
+
+        return {
+            "called": True,
+            "url": delete_url,
+            "status_code": response.status_code,
+            "status": response_data.get("status"),
+            "message": response_data.get("message"),
+            "document_id": response_data.get("document_id") or document_id,
+            "deleted": response_data.get("deleted") or {
+                "file": False,
+                "json": False,
+            },
+            "error": response_data.get("error"),
+        }
+
+    except httpx.RequestError as e:
+        return {
+            "called": False,
+            "url": delete_url,
+            "status_code": None,
+            "status": "error",
+            "message": "8003 문서 삭제 서버에 연결할 수 없습니다.",
+            "document_id": document_id,
+            "deleted": {
+                "file": False,
+                "json": False,
+            },
+            "error": repr(e),
+        }
+
+    except Exception as e:
+        return {
+            "called": False,
+            "url": delete_url,
+            "status_code": None,
+            "status": "error",
+            "message": "8003 문서 삭제 요청 중 오류가 발생했습니다.",
+            "document_id": document_id,
+            "deleted": {
+                "file": False,
+                "json": False,
+            },
+            "error": repr(e),
+        }
+
+
 def _save_processed_result_to_local_json(
     processed_result: dict,
     document_id: str,
 ) -> str:
     """
     8003이 내려준 json_path는 8003 서버의 로컬 경로일 수 있다.
-
-    예:
-    C:\\Users\\aaa\\Documents\\GitHub\\AI-Agent-System\\data\\uploads\\documents\\파일명.json
-
     8000 서버가 Mac이나 다른 환경에서 실행되면 위 경로를 직접 읽을 수 없다.
     그래서 8003 응답 JSON 전체를 8000 서버 로컬에 다시 저장하고,
     그 로컬 json_path를 SQLite documents.json_path에 저장한다.
@@ -156,10 +249,6 @@ async def _process_document_file(
 
     response.raise_for_status()
     processed_result = response.json()
-
-    # 디버깅용: 8003 원본 응답 확인이 필요할 때만 잠깐 사용
-    # print("[8003 원본 응답]")
-    # print(json.dumps(processed_result, ensure_ascii=False, indent=2))
 
     # 3. 8003 처리 결과에서 필요한 값 추출
     document_id = processed_result.get("document_id") or processed_result.get("id")
@@ -265,9 +354,9 @@ async def _process_document_file(
             "status": "error",
             "chunk_count": 0,
             "document_id": saved_document_id,
-            "error": str(e),
+            "error": repr(e),
         }
-        print(f"[document_service] ChromaDB 적재 실패: {e}")
+        print(f"[document_service] ChromaDB 적재 실패: {repr(e)}")
 
     # 9. 프론트에 최종 응답 반환
     return {
@@ -292,15 +381,9 @@ async def upload_and_process_document(
 ) -> dict:
     """
     문서 업로드 처리 함수.
-
-    문서 파일:
     - 8003 문서 처리 서버로 전달
     - 처리 결과를 받아 documents 테이블 저장
     - 저장 완료 후 document_loader.load_document()로 ChromaDB 적재
-
-    음성 파일:
-    - 이 함수에서 처리하지 않음
-    - POST /api/stt/upload 사용
     """
     filename = Path(file.filename).name if file and file.filename else "uploaded_file"
 
@@ -348,7 +431,7 @@ async def upload_and_process_document(
             filename=filename,
             document_type=document_type,
             message="외부 처리 서버 응답 오류가 발생했습니다.",
-            error=str(e),
+            error=repr(e),
         )
 
     except httpx.RequestError as e:
@@ -357,7 +440,7 @@ async def upload_and_process_document(
             filename=filename,
             document_type=document_type,
             message="외부 처리 서버에 연결할 수 없습니다.",
-            error=str(e),
+            error=repr(e),
         )
 
     except Exception as e:
@@ -366,5 +449,96 @@ async def upload_and_process_document(
             filename=filename,
             document_type=document_type,
             message="문서 업로드 또는 처리 중 오류가 발생했습니다.",
-            error=str(e),
+            error=repr(e),
         )
+
+# 문서 삭제 처리 함수
+# ChromaDB 삭제는 chroma_client에 삭제 함수가 준비되면 추가 연결
+def delete_processed_document(document_id: str) -> dict:
+    try:
+        # 1. 삭제 대상 문서 조회
+        document = get_document_by_id(document_id)
+
+        if not document:
+            return {
+                "status": "error",
+                "document_id": document_id,
+                "message": "삭제할 문서를 찾을 수 없습니다.",
+                "deleted": {
+                    "document_chunks": 0,
+                    "document": False,
+                    "local_json_file": False,
+                    "local_source_file": False,
+                    "external_file": False,
+                    "external_json": False,
+                    "chroma": False,
+                },
+                "document_server_result": None,
+                "error": "document_not_found",
+            }
+
+        json_path = document.get("json_path") or ""
+        file_path = document.get("file_path") or ""
+
+        # 2. 8003 서버 원본 문서 및 처리 JSON 삭제 요청
+        document_server_result = _delete_document_from_8003(document_id)
+
+        external_deleted = document_server_result.get("deleted") or {}
+        external_file_deleted = bool(external_deleted.get("file"))
+        external_json_deleted = bool(external_deleted.get("json"))
+
+        # 3. SQLite document_chunks 삭제
+        deleted_chunks_count = delete_document_chunks(document_id)
+
+        # 4. 8000 로컬 JSON 파일 삭제
+        deleted_local_json_file = _safe_delete_local_file(json_path)
+
+        # 5. 8000에서 접근 가능한 원본 파일이면 삭제
+        deleted_local_source_file = _safe_delete_local_file(file_path)
+
+        # 6. SQLite documents 삭제
+        deleted_document = delete_document(document_id)
+
+        # 7. 최종 상태 결정
+        # 8000 내부 삭제는 성공했지만 8003 삭제가 실패할 수 있으므로 상태를 분리한다.
+        if document_server_result.get("status") == "success":
+            final_status = "success"
+            message = "문서 삭제가 완료되었습니다."
+            error = None
+
+        elif document_server_result.get("status") == "partial_success":
+            final_status = "partial_success"
+            message = "8000 문서는 삭제되었지만, 8003 서버에서 일부 파일만 삭제되었습니다."
+            error = document_server_result.get("error")
+
+        else:
+            final_status = "partial_success"
+            message = "8000 문서는 삭제되었지만, 8003 서버 원본 삭제는 실패했습니다."
+            error = document_server_result.get("error")
+
+        return {
+            "status": final_status,
+            "document_id": document_id,
+            "message": message,
+            "deleted": {
+                "document_chunks": deleted_chunks_count,
+                "document": deleted_document,
+                "local_json_file": deleted_local_json_file,
+                "local_source_file": deleted_local_source_file,
+                "external_file": external_file_deleted,
+                "external_json": external_json_deleted,
+                "chroma": False,
+            },
+            "document_server_result": document_server_result,
+            "error": error,
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "document_id": document_id,
+            "message": "문서 삭제 중 오류가 발생했습니다.",
+            "deleted": None,
+            "document_server_result": None,
+            "error": repr(e),
+        }

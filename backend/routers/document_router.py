@@ -3,7 +3,8 @@ from typing import Literal
 
 from fastapi import APIRouter, UploadFile, File, Form
 
-from backend.services.document_service import upload_and_process_document
+from backend.services.document_service import upload_and_process_document,delete_processed_document
+
 from backend.db.crud import (
     get_all_documents,
     ensure_conversation,
@@ -111,3 +112,10 @@ async def upload_document(
         room_id=room_id,
         document_type=document_type,
     )
+
+
+# 문서 삭제 API
+# 실제 경로: DELETE /api/documents/{document_id}
+@router.delete("/{document_id}")
+def delete_document_api(document_id: str):
+    return delete_processed_document(document_id)
