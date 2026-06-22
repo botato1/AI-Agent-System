@@ -1,217 +1,390 @@
-# backend/modules/rag/document_loader.py
-import os
-import sys
-import uuid
-import re
-from pathlib import Path
-from datetime import datetime, timezone
+# backend/services/document_loader.py
+#
+# 사용자 업로드 문서(document/meeting)와 음성(voice)을
+# 청킹해서 ChromaDB에 적재하는 모듈.
+#
+# [청킹 전략]
+# document/meeting:
+#   - chunks[]에서 style=="caption" 제거 (팀원이 미리 제거해서 넘겨줄 예정)
+#   - style=="title"  → 새 청크 경계 + content 맨 앞에 포함
+#   - style=="body"   → 500~1700자 기준으로 묶기
+#   - 청크 content = "[섹션 title]\n[body 내용들]"
+#
+# voice:
+#   - transcription[] 발화를 300~800자 기준으로 묶기
+#   - 화자 바뀌는 지점 우선 경계로
+#   - 청크 content = "[SPEAKER_00]: 발화\n[SPEAKER_01]: 발화\n..."
+#
+# [컬렉션 매핑]
+#   type == "document" → document_collection
+#   type == "meeting"  → meeting_collection
+#   type == "voice"    → meeting_collection
 
-BASE_DIR = Path(__file__).resolve().parents[3]
+import sys
+import json
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parents[2]
 if str(BASE_DIR) not in sys.path:
     sys.path.append(str(BASE_DIR))
 
 from backend.modules.rag.chroma_client import insert_document
+from backend.db.crud import get_document_by_id
 
-RAW_DATA_DIR = os.path.join(BASE_DIR, "data", "raw")
-
-
-def get_utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def load_txt(file_path: str) -> str:
-    with open(file_path, "r", encoding="utf-8") as f:
-        return f.read()
+# ── 청킹 파라미터 ──────────────────────────────────────────────
+DOC_CHUNK_MIN  = 500    # 문서 청크 최소 글자 수
+DOC_CHUNK_MAX  = 1700   # 문서 청크 최대 글자 수
+STT_CHUNK_MIN  = 300    # 음성 청크 최소 글자 수
+STT_CHUNK_MAX  = 800    # 음성 청크 최대 글자 수
 
 
-def load_pdf(file_path: str) -> str:
-    try:
-        import fitz
-        doc = fitz.open(file_path)
-        text = ""
+# ── 문서/회의록 청킹 ──────────────────────────────────────────
 
-        for page in doc:
-            text += page.get_text()
+def _chunk_document(chunks: list) -> list[dict]:
+    """
+    document/meeting 타입의 chunks[]를 받아서
+    검색에 적합한 크기(500~1700자)의 청크 리스트로 반환한다.
 
-        return text
+    규칙:
+    - style == "caption" → 제외 (팀원이 미리 제거 예정이지만 방어 코드로 유지)
+    - style == "title"   → 새 청크 경계. 현재 모인 body가 있으면 먼저 확정.
+                           다음 청크의 맨 앞에 이 title을 포함시킴.
+    - style == "body"    → 현재 청크에 계속 추가.
+                           DOC_CHUNK_MAX를 넘으면 현재 청크 확정 후 새로 시작.
 
-    except ImportError:
-        print("PyMuPDF 없음 → pip install pymupdf")
-        return ""
+    반환: [{"content": str, "page_number": int}, ...]
+    """
+    result = []
+    current_lines = []       # 현재 청크에 모인 텍스트 라인들
+    current_title = ""       # 현재 섹션 title
+    current_page = 1         # 현재 페이지 번호
+    current_chars = 0        # 현재 청크의 글자 수
 
+    def flush(lines, title, page):
+        """현재 모인 lines를 하나의 청크로 확정."""
+        if not lines:
+            return
+        content = "\n".join(lines).strip()
+        if not content:
+            return
+        # title이 있으면 content 맨 앞에 포함
+        if title:
+            content = f"{title}\n{content}"
+        result.append({"content": content, "page_number": page})
 
-def smart_semantic_splitter(text: str, max_chunk_size: int = 800) -> list[str]:
-    paragraphs = text.split("\n")
-    chunks = []
-    current_chunk = ""
+    for chunk in chunks:
+        style = chunk.get("metadata", {}).get("style", "body")
+        content = chunk.get("content", "").strip()
+        page = chunk.get("page_number", 1)
 
-    for para in paragraphs:
-        para = para.strip()
-
-        if not para:
+        if not content:
             continue
 
-        if len(current_chunk) + len(para) < max_chunk_size:
-            current_chunk += para + "\n"
-        else:
-            if current_chunk:
-                chunks.append(current_chunk.strip())
+        # caption 제외 (방어 코드)
+        if style == "caption":
+            continue
 
-            current_chunk = para + "\n"
+        if style == "title":
+            # 현재 모인 body가 있으면 먼저 확정
+            if current_lines:
+                flush(current_lines, current_title, current_page)
+                current_lines = []
+                current_chars = 0
+            # 새 섹션 시작
+            current_title = content
+            current_page = page
 
-    if current_chunk:
-        chunks.append(current_chunk.strip())
+        elif style == "body":
+            content_len = len(content)
 
-    return chunks
+            # 이미 MAX를 넘는 경우: 현재 청크 확정 후 새로 시작
+            if current_chars + content_len > DOC_CHUNK_MAX and current_chars >= DOC_CHUNK_MIN:
+                flush(current_lines, current_title, current_page)
+                current_lines = []
+                current_chars = 0
+                # title은 다음 청크에도 이어서 사용 (같은 섹션 내 분할이므로)
+
+            current_lines.append(content)
+            current_chars += content_len
+            current_page = page
+
+    # 마지막 청크 처리
+    flush(current_lines, current_title, current_page)
+
+    return result
 
 
-def auto_tag_metadata(file_name: str, content: str) -> dict:
-    now = get_utc_now()
-    lower_file_name = file_name.lower()
+# ── 음성(STT) 청킹 ────────────────────────────────────────────
 
-    metadata = {
-        "title": file_name,
-        "type": "document",
-        "source": "text",
-        "language": "ko",
-        "created_at": now,
-        "status": "processed",
-        "notion_url": "",
-        "chroma_id": "",
-        "error": "",
-        "user_edited": False,
-        "tags": "일반",
-        "importance_score": 50,
+def _chunk_transcription(transcription: list) -> list[dict]:
+    """
+    voice 타입의 transcription[]을 받아서
+    검색에 적합한 크기(300~800자)의 청크 리스트로 반환한다.
+
+    규칙:
+    - 화자(speaker)가 바뀌는 지점을 우선 청크 경계로 사용
+    - 같은 화자가 이어지더라도 STT_CHUNK_MAX를 넘으면 청크 확정
+
+    반환: [{"content": str, "start": float, "end": float}, ...]
+    """
+    result = []
+    current_lines = []    # "[SPEAKER_00]: 발화내용" 형식의 라인들
+    current_chars = 0
+    current_start = 0.0
+    current_end = 0.0
+    prev_speaker = None
+
+    def flush(lines, start, end):
+        if not lines:
+            return
+        content = "\n".join(lines).strip()
+        if content:
+            result.append({"content": content, "start": start, "end": end})
+
+    for seg in transcription:
+        speaker = seg.get("speaker", "SPEAKER_00")
+        text = seg.get("text", "").strip()
+        start = seg.get("start", 0.0)
+        end = seg.get("end", 0.0)
+
+        if not text:
+            continue
+
+        line = f"[{speaker}]: {text}"
+        line_len = len(line)
+
+        speaker_changed = (prev_speaker is not None and speaker != prev_speaker)
+        over_max = (current_chars + line_len > STT_CHUNK_MAX and current_chars >= STT_CHUNK_MIN)
+
+        # 화자가 바뀌거나 MAX를 넘으면 현재 청크 확정
+        if (speaker_changed or over_max) and current_lines:
+            flush(current_lines, current_start, current_end)
+            current_lines = []
+            current_chars = 0
+            current_start = start
+
+        if not current_lines:
+            current_start = start
+
+        current_lines.append(line)
+        current_chars += line_len
+        current_end = end
+        prev_speaker = speaker
+
+    # 마지막 청크 처리
+    flush(current_lines, current_start, current_end)
+
+    return result
+
+
+# ── 컬렉션 결정 ───────────────────────────────────────────────
+
+def _get_upload_context(doc_type: str) -> str:
+    """
+    type → upload_context 매핑.
+    chroma_client.CONTEXT_TO_COLLECTION이 이 값을 기준으로
+    컬렉션을 결정한다.
+
+    document → document_collection
+    meeting  → meeting_collection
+    voice    → meeting_collection
+    """
+    mapping = {
+        "document": "document",
+        "meeting":  "meeting",
+        "voice":    "voice",
+    }
+    return mapping.get(doc_type, "document")
+
+
+# ── 공통 메타데이터 빌더 ──────────────────────────────────────
+
+def _build_base_meta(doc: dict, room_id: str = "") -> dict:
+    """문서/음성 공통 메타데이터."""
+    return {
+        "title":          doc.get("title", ""),
+        "document_id":    doc.get("id") or doc.get("document_id", ""),
+        "filename":       doc.get("filename", ""),
+        "type":           doc.get("type", "document"),
+        "source":         doc.get("source", ""),
+        "language":       doc.get("language", "ko"),
+        "created_at":     doc.get("created_at", ""),
+        "status":         doc.get("status", "processed"),
+        "notion_url":     doc.get("notion_url") or "",
+        "error":          doc.get("error") or "",
+        "user_edited":    False,
+        "tags":           ",".join(doc.get("tags", [])),
+        "importance_score": doc.get("importance_score", 0),
+        "room_id":        room_id,
+        "tech_score":     0,  # 사용자 업로드 문서는 tech_score 없음
     }
 
-    if "meeting" in lower_file_name or "회의록" in file_name:
-        metadata["type"] = "meeting"
-        metadata["importance_score"] = 85
-        metadata["tags"] = "회의록"
 
-        attendees = re.search(r"참석자:\s*([^\n]+)", content)
+# ── 메인 적재 함수 ────────────────────────────────────────────
 
-        if attendees:
-            metadata["title"] = f"{file_name} ({attendees.group(1).strip()})"
-
-    elif "crawl" in lower_file_name or "http" in content[:200]:
-        metadata["type"] = "document"
-        metadata["source"] = "text"
-        metadata["importance_score"] = 60
-        metadata["tags"] = "크롤링"
-
-    elif lower_file_name.endswith(".pdf"):
-        metadata["source"] = "pdf"
-        metadata["type"] = "document"
-
-    elif lower_file_name.endswith(".md"):
-        metadata["source"] = "md"
-
-    return metadata
-
-
-def load_and_insert(
-    file_path: str,
-    document_id: str | None = None,
-    room_id: str | None = None,
-    upload_context: str = "document"
-) -> str | None:
+def load_document(document_id: str, room_id: str = "") -> dict:
     """
-    문서를 읽어 청킹 후 ChromaDB에 저장한다.
+    document_id를 받아서 SQLite documents 테이블에서 json_path를 조회하고,
+    해당 JSON 파일을 읽어서 청킹 후 ChromaDB에 적재한다.
 
-    document_id, room_id는 document_service.py에서 생성한 값을 넘겨받아
-    SQLite documents 테이블과 ChromaDB metadata를 동기화하기 위해 사용한다.
+    흐름:
+    문서 업로드
+    → 8000에서 8003 호출
+    → 8000 SQLite documents 저장 (json_path 포함)
+    → load_document(document_id) 호출
+    → json_path에서 chunks[]/transcription[] 읽기
+    → 청킹 후 ChromaDB 저장
+
+    Args:
+        document_id: SQLite documents 테이블의 id
+        room_id: 채팅방 ID (검색 필터용)
+
+    Returns:
+        {"status": "success"/"error", "chunk_count": int, "document_id": str, "error": str}
     """
-    file_name = os.path.basename(file_path)
-    ext = os.path.splitext(file_name)[1].lower()
+    print(f"[document_loader] 적재 시작 → document_id={document_id}")
 
-    if ext in [".txt", ".md"]:
-        text = load_txt(file_path)
+    # 1. SQLite에서 문서 정보 조회
+    try:
+        db_record = get_document_by_id(document_id)
+    except Exception as e:
+        print(f"[document_loader] DB 조회 실패: {e}")
+        return {"status": "error", "chunk_count": 0, "document_id": document_id, "error": f"db_lookup_failed: {e}"}
 
-    elif ext == ".pdf":
-        text = load_pdf(file_path)
+    if not db_record:
+        print(f"[document_loader] document_id를 찾을 수 없음: {document_id}")
+        return {"status": "error", "chunk_count": 0, "document_id": document_id, "error": "document_not_found"}
 
-    else:
-        print(f"지원하지 않는 파일 형식: {ext}")
-        return None
+    json_path = db_record.get("json_path")
+    if not json_path:
+        print(f"[document_loader] json_path가 없음: {document_id}")
+        return {"status": "error", "chunk_count": 0, "document_id": document_id, "error": "json_path_missing"}
 
-    if not text.strip():
-        print(f"문서에서 추출된 텍스트가 없습니다: {file_name}")
-        return None
+    # 2. json_path에서 전체 JSON 읽기
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            doc = json.load(f)
+    except Exception as e:
+        print(f"[document_loader] JSON 파일 읽기 실패 ({json_path}): {e}")
+        return {"status": "error", "chunk_count": 0, "document_id": document_id, "error": f"json_read_failed: {e}"}
 
-    # document_id가 없으면 기존 방식처럼 새로 생성
-    # 단, 업로드 API에서는 document_service.py에서 만든 document_id를 넘겨주는 것이 원칙
-    if not document_id:
-        document_id = str(uuid.uuid4())
+    # 3. room_id가 없으면 db_record에서 보완
+    # SQLite documents 테이블의 컬럼명은 conversation_id
+    if not room_id:
+        room_id = db_record.get("conversation_id", "")
 
-    metadata = auto_tag_metadata(file_name, text)
-    print(f"분류 결과 → type: {metadata['type']}, 중요도: {metadata['importance_score']}")
+    # 4. 타입 판단 후 적재
+    doc_type = doc.get("type", "document")
+    upload_context = _get_upload_context(doc_type)
+    base_meta = _build_base_meta(doc, room_id)
 
-    chunks = smart_semantic_splitter(text)
-    print(f"총 {len(chunks)}개 청크로 분할됨")
+    try:
+        if doc_type == "voice":
+            return _load_voice(doc, base_meta, upload_context)
+        else:
+            return _load_text_document(doc, base_meta, upload_context)
 
-    for idx, chunk in enumerate(chunks):
-        doc = {
-            **metadata,
+    except Exception as e:
+        print(f"[document_loader 에러] {document_id}: {e}")
+        return {"status": "error", "chunk_count": 0, "document_id": document_id, "error": str(e)}
 
-            # chunk 자체의 고유 ID
-            "id": str(uuid.uuid4()),
 
-            # 실제 청크 내용
-            "content": chunk,
+def _load_text_document(doc: dict, base_meta: dict, upload_context: str) -> dict:
+    """document/meeting 타입 적재."""
+    chunks = doc.get("chunks", [])
+    doc_id = base_meta["document_id"]
 
-            # 청크 제목
-            "title": f"{metadata['title']} - chunk {idx + 1}",
-
-            # SQLite documents.id와 동일한 문서 ID
-            "document_id": document_id,
-
-            # 파일명 검색용
-            "filename": file_name,
-
-            # 어느 채팅방에서 업로드된 문서인지
-            "room_id": room_id or "",
-
-            # 업로드 맥락
-            "upload_context": upload_context,
-
-            # 몇 번째 청크인지
-            "chunk_index": idx,
-
-            # 추후 Chroma 내부 id를 따로 저장할 경우 사용
-            "chroma_id": "",
+    if not chunks:
+        print(f"[document_loader] chunks가 비어있음 → document_id: {doc_id}")
+        return {
+            "status": "error",
+            "chunk_count": 0,
+            "document_id": doc_id,
+            "error": "chunks_empty",
         }
 
-        insert_document(doc)
+    chunked = _chunk_document(chunks)
 
-    print(f"적재 완료: {file_name} ({len(chunks)}개 청크) | document_id: {document_id}")
-    return document_id
+    if not chunked:
+        print(f"[document_loader] 청킹 결과 없음 → document_id: {doc_id}")
+        return {
+            "status": "error",
+            "chunk_count": 0,
+            "document_id": doc_id,
+            "error": "chunk_result_empty",
+        }
+
+    for idx, chunk in enumerate(chunked):
+        chunk_id = f"{doc_id}_chunk_{idx:04d}"
+        metadata = {
+            **base_meta,
+            "chunk_index": idx,
+            "page_number": chunk.get("page_number", 1),
+            "upload_context": upload_context,
+            "chroma_id": chunk_id,
+        }
+        insert_document({
+            "id":      chunk_id,
+            "content": chunk["content"],
+            **metadata,
+        })
+
+    print(f"[document_loader] 완료 → {len(chunked)}개 청크 적재 (document_id: {doc_id})")
+    return {
+        "status": "success",
+        "chunk_count": len(chunked),
+        "document_id": doc_id,
+        "error": None,
+    }
 
 
-def run_bulk_pipeline():
-    print("\n[Embedder] 자동화 파이프라인 가동...\n")
+def _load_voice(doc: dict, base_meta: dict, upload_context: str) -> dict:
+    """voice 타입 적재."""
+    transcription = doc.get("transcription", [])
+    doc_id = base_meta["document_id"]
 
-    if not os.path.exists(RAW_DATA_DIR):
-        os.makedirs(RAW_DATA_DIR)
-        print(f"빈 데이터 폴더 생성됨: {RAW_DATA_DIR}")
-        return
+    if not transcription:
+        print(f"[document_loader] transcription이 비어있음 → document_id: {doc_id}")
+        return {
+            "status": "error",
+            "chunk_count": 0,
+            "document_id": doc_id,
+            "error": "transcription_empty",
+        }
 
-    file_list = [
-        f for f in os.listdir(RAW_DATA_DIR)
-        if f.endswith((".txt", ".md", ".pdf"))
-    ]
+    chunked = _chunk_transcription(transcription)
 
-    if not file_list:
-        print("data/raw 폴더에 처리할 파일이 없습니다.")
-        return
+    if not chunked:
+        print(f"[document_loader] STT 청킹 결과 없음 → document_id: {doc_id}")
+        return {
+            "status": "error",
+            "chunk_count": 0,
+            "document_id": doc_id,
+            "error": "stt_chunk_result_empty",
+        }
 
-    for file_name in file_list:
-        file_path = os.path.join(RAW_DATA_DIR, file_name)
-        print(f"처리 시작: {file_name}")
-        load_and_insert(file_path)
+    for idx, chunk in enumerate(chunked):
+        chunk_id = f"{doc_id}_chunk_{idx:04d}"
+        metadata = {
+            **base_meta,
+            "chunk_index": idx,
+            "page_number": 0,          # 음성은 페이지 개념 없음
+            "upload_context": upload_context,
+            "chroma_id": chunk_id,
+            # 음성 전용 메타데이터
+            "stt_start": chunk.get("start", 0.0),
+            "stt_end":   chunk.get("end", 0.0),
+        }
+        insert_document({
+            "id":      chunk_id,
+            "content": chunk["content"],
+            **metadata,
+        })
 
-    print("\n[완료] 모든 파일 적재 완료")
-
-
-if __name__ == "__main__":
-    run_bulk_pipeline()
+    print(f"[document_loader] 완료 → {len(chunked)}개 청크 적재 (document_id: {doc_id})")
+    return {
+        "status": "success",
+        "chunk_count": len(chunked),
+        "document_id": doc_id,
+        "error": None,
+    }
