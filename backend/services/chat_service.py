@@ -29,6 +29,57 @@ def is_document_reference_message(message: str) -> bool:
     return any(keyword in message for keyword in keywords)
 
 
+# FastAPI 응답 직렬화 전에 numpy 타입을 Python 기본 타입으로 변환
+def to_json_safe(value):
+    """
+    FastAPI/Pydantic이 JSON으로 변환할 수 없는 numpy 타입을
+    Python 기본 타입으로 변환한다.
+
+    예:
+    numpy.bool_    -> bool
+    numpy.integer  -> int
+    numpy.floating -> float
+    numpy.ndarray  -> list
+    """
+    try:
+        import numpy as np
+
+        if isinstance(value, np.bool_):
+            return bool(value)
+
+        if isinstance(value, np.integer):
+            return int(value)
+
+        if isinstance(value, np.floating):
+            return float(value)
+
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+
+    except ImportError:
+        pass
+
+    if isinstance(value, dict):
+        return {
+            key: to_json_safe(item)
+            for key, item in value.items()
+        }
+
+    if isinstance(value, list):
+        return [
+            to_json_safe(item)
+            for item in value
+        ]
+
+    if isinstance(value, tuple):
+        return [
+            to_json_safe(item)
+            for item in value
+        ]
+
+    return value
+
+
 # DB에서 가져온 메시지를 AgentState에서 쓰기 좋은 dict 리스트로 정리
 def normalize_messages_for_state(messages: list | None) -> list[dict]:
     if not messages:
@@ -186,7 +237,7 @@ def normalize_sources(sources: list | None) -> list[dict]:
                     or source.get("filename")
                     or source.get("source")
                     or f"source_{idx + 1}",
-                "score": source.get("score"),
+                "score": to_json_safe(source.get("score")),
             })
 
         elif isinstance(source, str):
@@ -356,27 +407,29 @@ def build_chat_response(state: AgentState) -> ChatResponseSchema:
 
     retrieved_docs = state.get("retrieved_docs") or []
 
+    graph_data = {
+        "current_step": state.get("current_step"),
+        "question_type": state.get("question_type"),
+        "need_general_answer": state.get("need_general_answer"),
+        "need_memory": state.get("need_memory"),
+        "need_rag": state.get("need_rag"),
+        "need_task_extract": state.get("need_task_extract"),
+        "need_notion_save": state.get("need_notion_save"),
+        "target_document_id": state.get("target_document_id"),
+        "target_filename": state.get("target_filename"),
+        "rag_filter": state.get("rag_filter"),
+        "low_confidence": state.get("low_confidence"),
+        "retrieved_docs_count": len(retrieved_docs),
+    }
+
     return ChatResponseSchema(
         room_id=state.get("room_id", ""),
         answer=state.get("final_answer") or "",
         summary=state.get("summary"),
-        tasks=tasks,
-        sources=sources,
-        notion_result=state.get("notion_result"),
-        graph_data={
-            "current_step": state.get("current_step"),
-            "question_type": state.get("question_type"),
-            "need_general_answer": state.get("need_general_answer"),
-            "need_memory": state.get("need_memory"),
-            "need_rag": state.get("need_rag"),
-            "need_task_extract": state.get("need_task_extract"),
-            "need_notion_save": state.get("need_notion_save"),
-            "target_document_id": state.get("target_document_id"),
-            "target_filename": state.get("target_filename"),
-            "rag_filter": state.get("rag_filter"),
-            "low_confidence": state.get("low_confidence"),
-            "retrieved_docs_count": len(retrieved_docs),
-        },
+        tasks=to_json_safe(tasks),
+        sources=to_json_safe(sources),
+        notion_result=to_json_safe(state.get("notion_result")),
+        graph_data=to_json_safe(graph_data),
         error=state.get("error"),
     )
 

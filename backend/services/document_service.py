@@ -1,11 +1,13 @@
 # 문서 업로드 및 처리 서비스
 import os
+import json
 from pathlib import Path
 
 from fastapi import UploadFile
 import httpx
 
 from backend.db.crud import ensure_conversation, save_document_metadata
+from backend.modules.rag.document_loader import load_document
 
 
 # 문서 처리 서버 8003
@@ -84,14 +86,47 @@ def _build_error_response(
         "file_path": None,
         "json_path": None,
         "summary": None,
+        "chroma_load_result": None,
         "message": message,
         "error": error,
     }
 
 
+def _save_processed_result_to_local_json(
+    processed_result: dict,
+    document_id: str,
+) -> str:
+    """
+    8003이 내려준 json_path는 8003 서버의 로컬 경로일 수 있다.
+
+    예:
+    C:\\Users\\aaa\\Documents\\GitHub\\AI-Agent-System\\data\\uploads\\documents\\파일명.json
+
+    8000 서버가 Mac이나 다른 환경에서 실행되면 위 경로를 직접 읽을 수 없다.
+    그래서 8003 응답 JSON 전체를 8000 서버 로컬에 다시 저장하고,
+    그 로컬 json_path를 SQLite documents.json_path에 저장한다.
+    """
+    local_json_dir = Path("data/uploads/documents")
+    local_json_dir.mkdir(parents=True, exist_ok=True)
+
+    local_json_path = local_json_dir / f"{document_id}.json"
+
+    # 8003 원본 json_path는 참고용으로 보존
+    original_json_path = processed_result.get("json_path") or ""
+    processed_result["original_json_path"] = original_json_path
+
+    # document_loader가 읽을 수 있는 8000 로컬 경로로 교체
+    processed_result["json_path"] = str(local_json_path)
+
+    with open(local_json_path, "w", encoding="utf-8") as f:
+        json.dump(processed_result, f, ensure_ascii=False, indent=2)
+
+    return str(local_json_path)
+
+
 # 문서 파일 처리
 # 프론트에서 받은 문서 파일을 8003 문서 처리 서버로 전달하고,
-# 8003 처리 결과를 documents 테이블에 저장한다.
+# 8003 처리 결과를 documents 테이블에 저장한 뒤 ChromaDB에 적재한다.
 async def _process_document_file(
     file: UploadFile,
     room_id: str,
@@ -122,16 +157,31 @@ async def _process_document_file(
     response.raise_for_status()
     processed_result = response.json()
 
+    # 디버깅용: 8003 원본 응답 확인이 필요할 때만 잠깐 사용
+    # print("[8003 원본 응답]")
+    # print(json.dumps(processed_result, ensure_ascii=False, indent=2))
+
     # 3. 8003 처리 결과에서 필요한 값 추출
     document_id = processed_result.get("document_id") or processed_result.get("id")
     result_room_id = processed_result.get("room_id") or room_id
-    result_filename = processed_result.get("filename") or processed_result.get("title") or filename
+    result_filename = (
+        processed_result.get("filename")
+        or processed_result.get("title")
+        or filename
+    )
     result_type = processed_result.get("type") or document_type
 
     file_path = processed_result.get("file_path") or ""
-    json_path = processed_result.get("json_path") or ""
     summary = processed_result.get("summary") or ""
-    content_markdown = processed_result.get("content_markdown") or ""
+
+    # 8003 응답에서는 content_markdown이 비어 있고 content에 전체 텍스트가 들어올 수 있음
+    content_markdown = (
+        processed_result.get("content_markdown")
+        or processed_result.get("content")
+        or ""
+    )
+
+    chunks = processed_result.get("chunks") or []
 
     # 4. 필수값 검증
     if not document_id:
@@ -142,13 +192,18 @@ async def _process_document_file(
             "filename": result_filename,
             "type": result_type,
             "file_path": file_path,
-            "json_path": json_path,
+            "json_path": processed_result.get("json_path") or "",
             "summary": summary,
+            "chroma_load_result": None,
             "message": "8003 문서 처리 결과에 document_id가 없습니다.",
             "error": "document_id_missing",
         }
 
-    if not content_markdown:
+    # content_markdown이 없더라도 chunks[]가 있으면 ChromaDB 적재는 가능하므로 통과
+    has_content = bool(content_markdown.strip())
+    has_chunks = isinstance(chunks, list) and len(chunks) > 0
+
+    if not has_content and not has_chunks:
         return {
             "status": "error",
             "room_id": result_room_id,
@@ -156,19 +211,30 @@ async def _process_document_file(
             "filename": result_filename,
             "type": result_type,
             "file_path": file_path,
-            "json_path": json_path,
+            "json_path": processed_result.get("json_path") or "",
             "summary": summary,
-            "message": "8003 문서 처리 결과에 content_markdown이 없습니다.",
-            "error": "content_markdown_missing",
+            "chroma_load_result": None,
+            "message": "8003 문서 처리 결과에 content 또는 chunks가 없습니다.",
+            "error": "document_content_missing",
         }
 
-    # 5. 채팅방 생성 또는 갱신
+    # document_loader 또는 추후 조회에서 content_markdown으로도 접근할 수 있게 정리
+    processed_result["content_markdown"] = content_markdown
+
+    # 5. 8003 응답 JSON 전체를 8000 서버 로컬에 저장
+    #    SQLite에는 8003 서버의 Windows json_path가 아니라 8000 로컬 json_path를 저장한다.
+    json_path = _save_processed_result_to_local_json(
+        processed_result=processed_result,
+        document_id=document_id,
+    )
+
+    # 6. 채팅방 생성 또는 갱신
     ensure_conversation(
         conversation_id=result_room_id,
         title=result_filename,
     )
 
-    # 6. documents 테이블에 문서 메타데이터 저장
+    # 7. documents 테이블에 문서 메타데이터 저장
     saved_document_id = save_document_metadata({
         "id": document_id,
         "conversation_id": result_room_id,
@@ -184,7 +250,26 @@ async def _process_document_file(
         "error": "",
     })
 
-    # 7. 프론트에 최종 응답 반환
+    # 8. SQLite 저장 완료 후 ChromaDB 적재
+    # document_loader는 documents.json_path를 다시 읽어서
+    # chunks[] / transcription[] 기반으로 ChromaDB에 저장한다.
+    try:
+        chroma_load_result = load_document(
+            document_id=saved_document_id,
+            room_id=result_room_id,
+        )
+        print(f"[document_service] ChromaDB 적재 결과: {chroma_load_result}")
+
+    except Exception as e:
+        chroma_load_result = {
+            "status": "error",
+            "chunk_count": 0,
+            "document_id": saved_document_id,
+            "error": str(e),
+        }
+        print(f"[document_service] ChromaDB 적재 실패: {e}")
+
+    # 9. 프론트에 최종 응답 반환
     return {
         "status": "success",
         "room_id": result_room_id,
@@ -194,7 +279,8 @@ async def _process_document_file(
         "file_path": file_path,
         "json_path": json_path,
         "summary": summary,
-        "message": "문서 처리 및 메타데이터 저장이 완료되었습니다.",
+        "chroma_load_result": chroma_load_result,
+        "message": "문서 처리, 메타데이터 저장 및 ChromaDB 적재 요청이 완료되었습니다.",
         "error": None,
     }
 
@@ -210,6 +296,7 @@ async def upload_and_process_document(
     문서 파일:
     - 8003 문서 처리 서버로 전달
     - 처리 결과를 받아 documents 테이블 저장
+    - 저장 완료 후 document_loader.load_document()로 ChromaDB 적재
 
     음성 파일:
     - 이 함수에서 처리하지 않음
