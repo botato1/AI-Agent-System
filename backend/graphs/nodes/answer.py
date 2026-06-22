@@ -11,6 +11,10 @@ def answer_node(state: AgentState) -> AgentState:
     memory_context = state.get("memory_context") or ""
     tasks = state.get("tasks") or []
 
+    # rag_node에서 저장한 RAG 검색 결과
+    retrieved_docs = state.get("retrieved_docs") or []
+    low_confidence = state.get("low_confidence", False)
+
     # Notion 저장 요청은 notion_node에서 최종 저장 결과를 만든다.
     if state.get("need_notion_save", False):
         return {
@@ -20,11 +24,11 @@ def answer_node(state: AgentState) -> AgentState:
             "error": state.get("error"),
         }
 
-    # 문서 기반 질문인데 검색 결과가 없으면 추측 답변 방지
+    # RAG 검색이 필요한 질문인데 검색 결과가 없으면 추측 답변 방지
     if state.get("need_rag", False) and not rag_context.strip():
         return {
             **state,
-            "final_answer": "요청하신 문서에서 관련 내용을 찾지 못했습니다. 문서가 업로드되어 있는지, 파일명이나 질문 내용을 확인해 주세요.",
+            "final_answer": "관련 문서 또는 지식 검색 결과를 찾지 못했습니다. 질문 내용을 조금 더 구체적으로 입력해 주세요.",
             "current_step": "answer_node",
             "error": state.get("error"),
         }
@@ -51,10 +55,10 @@ def answer_node(state: AgentState) -> AgentState:
             )
 
         if question_type == "task_from_memory":
-             answer_title = "대화에서 추출한 할 일은 다음과 같습니다."
+            answer_title = "대화에서 추출한 할 일은 다음과 같습니다."
         else:
             answer_title = "문서에서 추출한 할 일은 다음과 같습니다."
-            
+
         final_answer = answer_title + "\n\n" + "\n\n".join(task_lines)
 
         return {
@@ -80,6 +84,8 @@ def answer_node(state: AgentState) -> AgentState:
             rag_context=rag_context,
             memory_context=memory_context,
             tasks=tasks,
+            retrieved_docs=retrieved_docs,
+            low_confidence=low_confidence,
         )
 
         return {
