@@ -14,7 +14,7 @@ def classifier_node(state: AgentState) -> AgentState:
 
         # 2. 5개 question_type 외 값이 들어오면 general_answer로 처리
         valid_question_types = {
-            "task_from_RAG",
+            "task_from_rag",
             "task_from_memory",
             "notion_save",
             "knowledge_search",
@@ -42,7 +42,7 @@ def classifier_node(state: AgentState) -> AgentState:
 
         # 6. 문서 기반 요청인지 판단
         # "문서"라는 단어 하나만으로 RAG를 태우면
-        # "프론트 문서 업로드 버튼" 같은 일반 대화도 task_from_RAG로 잘못 분류될 수 있음
+        # "프론트 문서 업로드 버튼" 같은 일반 대화도 task_from_rag로 잘못 분류될 수 있음
         # 따라서 "이 문서에서", "회의록에서", "첨부한 파일"처럼
         # 실제 선택 문서를 가리키는 표현일 때만 문서 기반 요청으로 판단한다.
         document_target_keywords = [
@@ -126,7 +126,7 @@ def classifier_node(state: AgentState) -> AgentState:
         # 7. 문서 기반 할 일 추출 요청 보정
         # 예: "이 문서에서 해야 할 일 정리해줘"
         if has_document_target and mentions_document_target and mentions_task:
-            question_type = "task_from_RAG"
+            question_type = "task_from_rag"
 
         # 8. 문서 기반 요약/질문 요청 보정
         # 예: "이 문서 요약해줘", "이 파일 내용 알려줘"
@@ -147,13 +147,13 @@ def classifier_node(state: AgentState) -> AgentState:
         need_memory = question_type == "task_from_memory"
 
         need_rag = question_type in {
-            "task_from_RAG",
+            "task_from_rag",
             "notion_save",
             "knowledge_search",
         }
 
         need_task_extract = question_type in {
-            "task_from_RAG",
+            "task_from_rag",
             "task_from_memory",
         }
 

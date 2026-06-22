@@ -7,6 +7,7 @@ from backend.routers.document_router import router as document_router
 from backend.routers.notion_router import router as notion_router
 from backend.routers.agent_router import router as agent_router
 from backend.routers.task_router import router as task_router
+from backend.routers.stt_router import router as stt_router
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(
@@ -32,6 +33,7 @@ app.include_router(document_router)
 app.include_router(notion_router)
 app.include_router(agent_router)
 app.include_router(task_router)
+app.include_router(stt_router)
 
 @app.get("/")
 def root():
