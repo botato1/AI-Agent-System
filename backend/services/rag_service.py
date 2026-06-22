@@ -19,7 +19,13 @@ from backend.modules.rag.chroma_client import (
 CANDIDATE_K  = 60      # 하이브리드 검색에서 가져올 후보 수
 SCALE_FACTOR = 0.0005  # tech_score 보정 가중치 (실측 후 조정)
 
-# 신호어 (의도분류와 컬렉션 선택 양쪽에서 참고할 공통 키워드)
+# [추가 - 2026.06.18]
+# 적재(크롤링) 단계의 "탈락시키지 않는다"는 원칙과는 별개로,
+# 검색/답변 단계에서는 질문별로 실제 관련도가 다르므로 신뢰도 기준이 필요함.
+# 8개 질문 실측 기준: 명확히 관련있는 케이스는 0.7~0.99, 무관한 케이스는
+# 0.3 미만으로 나타남. 0.3을 임시 경계값으로 설정 (추가 테스트로 조정 필요).
+LOW_CONFIDENCE_THRESHOLD = 0.3
+
 MEETING_SIGNALS = [
     "회의", "저번에", "말했던", "논의", "액션아이템",
     "참석자", "지난", "미팅", "회의록",
@@ -39,41 +45,17 @@ def get_utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def is_rag_result_relevant(rag_result: dict, min_score: float = 0.5) -> bool:
-    if rag_result.get("status") != "success":
-        return False
-    if rag_result.get("count", 0) == 0:
-        return False
-    data = rag_result.get("data", [])
-    if not data:
-        return False
-    top_score = data[0].get("score", 0)
-    return top_score >= min_score
-
-
 def _has_specific_document_filter(filter: dict | None) -> bool:
     if not filter:
         return False
     return bool(filter.get("document_id") or filter.get("filename"))
 
 
-# ── 컬렉션 선택 (복수 반환) ───────────────────────────────────
 def _select_collections(
     question_type: str,
     query: str = "",
     filter: dict | None = None,
 ) -> list[str]:
-    """
-    question_type(3개: task_from_rag, notion_save, knowledge_search)과
-    query 신호어를 함께 보고 검색할 컬렉션 리스트 반환.
-
-    설계 원칙:
-    - 신호어를 먼저 판단 (실제 사용자 발화 기준, 더 정확)
-    - question_type은 "최소 보장" 힌트로만 추가
-      (task_from_rag → meeting 최소 보장,
-       나머지는 신호어만으로 판단)
-    - 신호어가 하나도 안 잡히면 전체 컬렉션 검색 (정보 손실 방지)
-    """
     all_collections = [MEETING_COLLECTION, DOCUMENT_COLLECTION, KNOWLEDGE_COLLECTION]
 
     if _has_specific_document_filter(filter):
@@ -88,14 +70,8 @@ def _select_collections(
     if has_document:  targets.add(DOCUMENT_COLLECTION)
     if has_knowledge: targets.add(KNOWLEDGE_COLLECTION)
 
-    # question_type을 "최소 보장" 힌트로 추가
-    # (신호어가 못 잡아도 question_type이 확실하면 강제로 포함)
     if question_type == "task_from_rag":
         targets.add(MEETING_COLLECTION)
-
-    # task_from_memory, general_answer는 여기 도달하지 않음
-    # (need_rag=False라서 retrieve_relevant_knowledge 자체가 호출 안 됨)
-    # notion_save, knowledge_search는 신호어 판단에만 의존
 
     return list(targets) if targets else all_collections
 
@@ -107,10 +83,22 @@ class RAGService:
         query: str,
         original_query: str = None,
         top_k: int = 5,
-        relative_threshold: float = 0.5,
+        relative_threshold: float = 0.5,  # 더 이상 필터링에 사용 안 함 (호환성 위해 파라미터만 유지)
         filter: dict = None,
         question_type: str = "general_answer",
     ):
+        """
+        흐름:
+        1. _select_collections()로 검색할 컬렉션(들) 결정
+        2. 각 컬렉션에서 하이브리드 검색 (후보 CANDIDATE_K개씩)
+        3. 전체 후보를 reranker로 재평가
+        4. final_score = reranker_score + tech_score*SCALE_FACTOR (knowledge만 보정)
+        5. final_score 기준 정렬
+        6. 상위 top_k개만 잘라서 반환 (적재 단계와 달리, 결과 자체는 탈락시키지
+           않고 그대로 반환함. 다만 최고 점수가 LOW_CONFIDENCE_THRESHOLD 미만이면
+           low_confidence=True로 표시해서, 답변 생성 단계(ollama_client)가
+           "관련 문서를 찾지 못했다"는 안내와 함께 참고용으로만 보여주도록 함)
+        """
         print(f"[RAG Service] 쿼리: '{query}' / 타입: '{question_type}'")
         print(f"[RAG Service] filter: {filter}")
 
@@ -143,6 +131,7 @@ class RAGService:
                     "query": query,
                     "count": 0,
                     "data": [],
+                    "low_confidence": True,
                     "error": None,
                 }
 
@@ -158,22 +147,11 @@ class RAGService:
                 else:
                     res["final_score"] = reranker_score
 
+            # final_score 기준 정렬 (탈락 없이 전체 정렬)
             all_results.sort(key=lambda x: x["final_score"], reverse=True)
 
-            max_score = all_results[0]["final_score"]
-            min_absolute_bound = 0.1
             processed_documents = []
-
             for res in all_results:
-                relative_ratio = res["final_score"] / max_score if max_score > 0 else 0
-
-                if (
-                    res["final_score"] < min_absolute_bound
-                    or relative_ratio < relative_threshold
-                ):
-                    print(f"[탈락] final_score: {res['final_score']:.4f}")
-                    continue
-
                 meta = res.get("metadata", {})
 
                 processed_documents.append({
@@ -202,31 +180,26 @@ class RAGService:
                     "collection":     res.get("collection", ""),
                 })
 
+            # top_k에서만 자르기 (그 외 탈락 로직 없음)
             processed_documents = processed_documents[:top_k]
+
+            top_score = processed_documents[0]["score"] if processed_documents else 0
+            is_low_confidence = top_score < LOW_CONFIDENCE_THRESHOLD
 
             result = {
                 "status": "success",
                 "query":  query,
                 "count":  len(processed_documents),
                 "data":   processed_documents,
+                "low_confidence": is_low_confidence,
                 "error":  None,
             }
 
-            if _has_specific_document_filter(filter):
-                print(f"[RAG Service] 특정 문서 검색 완료 → {len(processed_documents)}개 반환")
-                return result
-
-            if not is_rag_result_relevant(result):
-                print("[RAG Service] 품질 미달 → 빈 결과 반환")
-                return {
-                    "status": "success",
-                    "query":  query,
-                    "count":  0,
-                    "data":   [],
-                    "error":  None,
-                }
-
-            print(f"[RAG Service] 완료 → {len(processed_documents)}개 반환 (최고 final_score: {max_score:.4f})")
+            confidence_label = "낮음" if is_low_confidence else "정상"
+            print(
+                f"[RAG Service] 완료 → {len(processed_documents)}개 반환 "
+                f"(최고 final_score: {top_score:.4f}, 신뢰도: {confidence_label})"
+            )
             return result
 
         except Exception as e:
@@ -236,6 +209,7 @@ class RAGService:
                 "query":  query,
                 "count":  0,
                 "data":   [],
+                "low_confidence": True,
                 "error":  f"RAG 파이프라인 장애: {str(e)}",
             }
 

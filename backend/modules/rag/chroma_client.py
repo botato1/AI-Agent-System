@@ -6,6 +6,27 @@ from pathlib import Path
 from rank_bm25 import BM25Okapi
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
+# ── 네이티브 라이브러리 import 순서 고정 ──────────────────────
+# [수정 사항 - 2026.06.18]
+# 증상: FlagEmbedding(리랭커)을 import하는 시점에 Windows에서
+#       access violation(0xC0000005)으로 파이썬 프로세스가 죽는 문제가 있었음.
+# 원인 조사: faulthandler로 스택트레이스를 떠보니, 죽는 지점은 항상
+#       pyarrow였음 (pandas.compat.pyarrow → pyarrow, 또는
+#       datasets.packaged_modules → pyarrow.dataset → pyarrow 경로).
+#       다만 torch/pandas/sklearn/transformers/datasets를 미리
+#       이 순서로 import해둔 다음 sentence_transformers나
+#       FlagEmbedding을 import하면 죽지 않는 것이 실측으로 확인됨.
+#       즉 pyarrow 자체가 손상된 게 아니라, 어떤 네이티브 라이브러리가
+#       먼저 초기화되느냐에 따라 충돌 여부가 갈리는 "초기화 순서" 문제.
+# 조치: 이 파일에서 FlagEmbedding을 쓰기 전에, 검증된 순서로
+#       미리 import해서 충돌을 회피함. 이 블록을 지우면 reranker가
+#       다시 죽을 수 있으니 임의로 제거하지 말 것.
+import torch        # noqa: F401
+import pandas        # noqa: F401
+import sklearn        # noqa: F401
+import transformers   # noqa: F401
+import datasets       # noqa: F401
+
 BASE_DIR = Path(__file__).resolve().parents[3]
 if str(BASE_DIR) not in sys.path:
     sys.path.append(str(BASE_DIR))
@@ -132,16 +153,20 @@ def _get_reranker():
     global _reranker
     if _reranker is None:
         from FlagEmbedding import FlagReranker
-        # use_fp16=False + devices=["cpu"]로 안전하게 로드.
-        # GPU+fp16 조합에서 환경에 따라 프로세스가 에러 없이
-        # 죽는 문제가 있어 CPU/fp32로 고정해서 안정성 우선.
-        # (속도가 더 필요해지면 devices=["cuda:0"]로 다시 전환 가능,
-        #  단 그 경우 use_fp16=False부터 먼저 테스트할 것)
-        print("[reranker] BAAI/bge-reranker-v2-m3 로딩 중 (CPU, fp32)...")
+        # [수정 - 2026.06.18] CPU/fp32 -> GPU/fp16로 재전환 시도.
+        # 기존에는 GPU+fp16 조합에서 프로세스가 에러 없이 죽는 문제가 있어
+        # CPU/fp32로 고정했었음. 그 문제가 사실은 이 파일 상단에 추가된
+        # import 순서 고정 코드로 해결한 access violation과 같은 종류의
+        # 문제였을 가능성이 있어 재시도함. CANDIDATE_K=60 기준 쿼리당
+        # 3분 이상 걸리던 속도 문제 해결 목적.
+        # 만약 다시 죽거나 OOM이 나면 use_fp16=False, devices=["cpu"]로
+        # 되돌릴 것 (단, 그러면 속도 문제도 같이 되돌아옴 — CANDIDATE_K를
+        # 줄이는 방향으로 대신 접근).
+        print("[reranker] BAAI/bge-reranker-v2-m3 로딩 중 (GPU, fp16)...")
         _reranker = FlagReranker(
             "BAAI/bge-reranker-v2-m3",
-            use_fp16=False,
-            devices=["cpu"],
+            use_fp16=True,
+            devices=["cuda:0"],
         )
         print("[reranker] 로딩 완료")
     return _reranker
