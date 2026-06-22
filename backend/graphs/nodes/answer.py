@@ -8,6 +8,7 @@ def answer_node(state: AgentState) -> AgentState:
     question_type = state.get("question_type", "general_answer")
 
     rag_context = state.get("rag_context") or ""
+    rag_search_result = state.get("rag_search_result")
     memory_context = state.get("memory_context") or ""
     tasks = state.get("tasks") or []
 
@@ -20,14 +21,19 @@ def answer_node(state: AgentState) -> AgentState:
             "error": state.get("error"),
         }
 
-    # 문서 기반 질문인데 검색 결과가 없으면 추측 답변 방지
-    if state.get("need_rag", False) and not rag_context.strip():
-        return {
-            **state,
-            "final_answer": "요청하신 문서에서 관련 내용을 찾지 못했습니다. 문서가 업로드되어 있는지, 파일명이나 질문 내용을 확인해 주세요.",
-            "current_step": "answer_node",
-            "error": state.get("error"),
-        }
+    # RAG 검색이 필요한 질문인데 검색 결과가 없으면 추측 답변 방지
+    # 단, rag_search_result가 있는 경우에는 ollama_client에서 검색 결과 구조를 보고 처리한다.
+    if state.get("need_rag", False):
+        has_rag_context = bool(rag_context.strip())
+        has_rag_search_result = bool(rag_search_result)
+
+        if not has_rag_context and not has_rag_search_result:
+            return {
+                **state,
+                "final_answer": "관련 문서 또는 지식 검색 결과를 찾지 못했습니다. 질문 내용을 조금 더 구체적으로 입력해 주세요.",
+                "current_step": "answer_node",
+                "error": state.get("error"),
+            }
 
     # 할 일 추출 결과가 이미 있으면 LLM에게 다시 답변 생성을 맡기지 않고,
     # 추출된 tasks 배열을 기준으로 최종 답변을 구성한다.
@@ -51,10 +57,10 @@ def answer_node(state: AgentState) -> AgentState:
             )
 
         if question_type == "task_from_memory":
-             answer_title = "대화에서 추출한 할 일은 다음과 같습니다."
+            answer_title = "대화에서 추출한 할 일은 다음과 같습니다."
         else:
             answer_title = "문서에서 추출한 할 일은 다음과 같습니다."
-            
+
         final_answer = answer_title + "\n\n" + "\n\n".join(task_lines)
 
         return {
@@ -78,6 +84,7 @@ def answer_node(state: AgentState) -> AgentState:
             user_message=user_message,
             question_type=question_type,
             rag_context=rag_context,
+            rag_search_result=rag_search_result,
             memory_context=memory_context,
             tasks=tasks,
         )
