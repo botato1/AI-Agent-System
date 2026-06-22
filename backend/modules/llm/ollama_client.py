@@ -28,6 +28,11 @@ def has_chinese(text: str) -> bool:
 
 # ── 시스템 프롬프트 ───────────────────────────────────────────
 DOBY_SYSTEM_GUIDE = """
+[언어 규칙 - 최우선 적용]
+- 반드시 한국어로만 답변하라.
+- 참고 내용이 영어로 되어있어도 답변은 반드시 한국어로 작성하라.
+- 중국어, 일본어, 영어 등 한국어 외 언어 사용은 절대 금지한다.
+
 너는 도비(Doby)라는 IT 프로젝트 업무 지원 AI 비서야.
 
 [주요 역할]
@@ -42,7 +47,7 @@ DOBY_SYSTEM_GUIDE = """
 - 날씨, 뉴스, 주식, 실시간 검색처럼 현재 시스템에서 지원하지 않는 기능을 할 수 있다고 말하지 않는다.
 - 지원하지 않는 기능을 물으면 불가능하다고만 끝내지 말고, 이 서비스에서 가능한 IT 문서/회의록/일정/업무 정리 기능을 안내한다.
 - 참고 문서가 필요한 질문인데 참고 문서가 없으면 추측하지 않는다.
-- 답변은 한국어로 작성한다.
+- 답변은 반드시 한국어로만 작성한다. 영어 문서를 참고해도 답변은 한국어로 번역해서 작성한다.
 """
 
 
@@ -208,20 +213,36 @@ def _build_context_from_docs(docs: list, max_chars: int = 6000) -> str:
 
 
 def _call_ollama(prompt: str, timeout: float = 150.0) -> str:
-    """Ollama 단일 호출 + 중국어 감지 재시도."""
+    """Ollama 단일 호출 + 중국어 감지 재시도 (최대 3회)."""
+    # 프롬프트 끝에 한국어 강제 지시 추가
+    ko_suffix = "\n\n[중요] 반드시 한국어로만 답하세요. 중국어 사용 절대 금지."
+
     response = httpx.post(
         f"{OLLAMA_BASE_URL}/api/generate",
-        json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
+        json={"model": OLLAMA_MODEL, "prompt": prompt + ko_suffix, "stream": False},
         timeout=timeout,
     )
     text = response.json().get("response", "답변 생성 실패").strip()
-    if has_chinese(text):
+
+    # 중국어 감지 시 최대 2회 추가 재시도
+    for attempt in range(2):
+        if not has_chinese(text):
+            break
+        print(f"[경고] 중국어 감지 → 재시도 {attempt + 1}/2")
         response = httpx.post(
             f"{OLLAMA_BASE_URL}/api/generate",
-            json={"model": OLLAMA_MODEL, "prompt": prompt + "\n반드시 한국어로만 답하세요.", "stream": False},
+            json={
+                "model": OLLAMA_MODEL,
+                "prompt": prompt + ko_suffix + "\n한국어 외 다른 언어는 절대 사용하지 마세요.",
+                "stream": False,
+            },
             timeout=timeout,
         )
         text = response.json().get("response", "답변 생성 실패").strip()
+
+    if has_chinese(text):
+        print("[경고] 3회 재시도 후에도 중국어 감지됨 — 그대로 반환")
+
     return text
 
 
