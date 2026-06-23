@@ -3,8 +3,11 @@ from typing import Literal
 
 from fastapi import APIRouter, UploadFile, File, Form
 
-from backend.services.document_service import upload_and_process_document,delete_processed_document
-
+from backend.services.document_service import (
+    upload_and_process_document,
+    delete_processed_document,
+    get_document_detail,
+)
 from backend.db.crud import (
     get_all_documents,
     ensure_conversation,
@@ -112,6 +115,14 @@ async def upload_document(
         room_id=room_id,
         document_type=document_type,
     )
+
+
+# 문서 상세 조회 API
+# 실제 경로: GET /api/documents/{document_id}
+# 문서 보관함에서 문서 1개 클릭 시 사용
+@router.get("/{document_id}")
+def get_document_detail_api(document_id: str):
+    return get_document_detail(document_id)
 
 
 # 문서 삭제 API

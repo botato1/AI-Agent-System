@@ -2,9 +2,91 @@ from backend.schemas.agent_schema import AgentState
 from backend.services.ollama_service import ollama_service
 
 
+def _clean_extracted_tasks(
+    tasks: list,
+    document_id: str | None = None,
+    room_id: str | None = None,
+) -> list:
+    """
+    LLM이 추출한 tasks 중 빈 task를 제거한다.
+    다양한 키 이름(task, title, content, 할 일, 다음 작업 등)을 표준 task 구조로 정규화한다.
+    """
+    if not tasks:
+        return []
+
+    cleaned_tasks = []
+
+    for idx, task in enumerate(tasks, start=1):
+        if not isinstance(task, dict):
+            continue
+
+        task_text = (
+            task.get("task")
+            or task.get("title")
+            or task.get("content")
+            or task.get("할 일")
+            or task.get("업무")
+            or task.get("작업")
+            or task.get("다음 작업")
+            or task.get("내용")
+            or ""
+        )
+        task_text = str(task_text).strip()
+
+        if not task_text:
+            continue
+
+        if task_text in {"할 일 없음", "없음", "해당 없음", "N/A", "null", "None"}:
+            continue
+
+        assignee = (
+            task.get("assignee")
+            or task.get("담당자")
+            or task.get("담당")
+            or task.get("owner")
+            or None
+        )
+
+        deadline = (
+            task.get("deadline")
+            or task.get("마감일")
+            or task.get("기한")
+            or task.get("due_date")
+            or task.get("due")
+            or None
+        )
+
+        status = (
+            task.get("status")
+            or task.get("상태")
+            or "todo"
+        )
+
+        priority = (
+            task.get("priority")
+            or task.get("우선순위")
+            or "medium"
+        )
+
+        cleaned_task = {
+            "task_id": task.get("task_id") or task.get("id") or f"task_{len(cleaned_tasks) + 1}",
+            "task": task_text,
+            "assignee": assignee,
+            "deadline": deadline,
+            "status": status,
+            "priority": priority,
+            "room_id": task.get("room_id") or room_id,
+            "document_id": task.get("document_id") or document_id,
+            "created_at": task.get("created_at"),
+        }
+
+        cleaned_tasks.append(cleaned_task)
+
+    return cleaned_tasks
+
+
 # LangGraph에서 문서 또는 대화 기반 할 일 추출을 담당하는 노드
 def task_node(state: AgentState) -> AgentState:
-    # 할 일 추출이 필요 없으면 task_node 실행 건너뜀
     if not state.get("need_task_extract", False):
         return {
             **state,
@@ -17,20 +99,26 @@ def task_node(state: AgentState) -> AgentState:
     memory_context = state.get("memory_context") or ""
     document_json = state.get("document_json") or {}
 
-    # 문서/음성 JSON이 직접 들어온 경우 우선 사용
-    if document_json.get("content"):
-        source_content = document_json.get("content")
+    source_content = ""
+    source_type = ""
 
-    # 문서 context가 있으면 사용
+    if isinstance(document_json, dict) and document_json.get("content"):
+        source_content = document_json.get("content") or ""
+        source_type = "document_json.content"
+
+    elif isinstance(document_json, dict) and document_json.get("content_markdown"):
+        source_content = document_json.get("content_markdown") or ""
+        source_type = "document_json.content_markdown"
+
     elif rag_context.strip():
         source_content = rag_context
+        source_type = "rag_context"
 
-    # 이전 대화 기반 task 추출이 필요한 경우 memory 사용
     elif memory_context.strip():
         source_content = memory_context
+        source_type = "memory_context"
 
     else:
-        # 사용자 요청문만 보고 task를 만들지 않도록 방어
         return {
             **state,
             "tasks": [],
@@ -39,12 +127,17 @@ def task_node(state: AgentState) -> AgentState:
         }
 
     try:
-        # 회의록/문서/메모리 내용에서 할 일 추출
-        tasks = ollama_service.extract_tasks_from_content(source_content)
+        extracted_tasks = ollama_service.extract_tasks_from_content(source_content)
 
-        # 로그인 기능이 없는 현재 구조에서는 현재 사용자를 식별할 수 없으므로
-        # 추출된 전체 담당자 업무를 자동 저장하지 않는다.
-        # 실제 저장은 사용자가 선택한 업무만 POST /api/tasks로 처리한다.
+        if extracted_tasks is None:
+            extracted_tasks = []
+
+        tasks = _clean_extracted_tasks(
+            tasks=extracted_tasks,
+            document_id=state.get("target_document_id"),
+            room_id=state.get("room_id"),
+        )
+
         return {
             **state,
             "tasks": tasks,
@@ -53,8 +146,6 @@ def task_node(state: AgentState) -> AgentState:
         }
 
     except Exception as e:
-        print(f"[task_node 에러]: {str(e)}")
-
         return {
             **state,
             "tasks": [],
