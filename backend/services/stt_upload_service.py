@@ -18,6 +18,13 @@ from backend.db.crud import (
     get_all_voice_documents,
     delete_document,
 )
+from backend.modules.rag.document_loader import (
+    _load_voice,
+    _get_upload_context,
+    _build_base_meta,
+)
+from backend.modules.rag.chroma_client import delete_document as chroma_delete_document
+
 
 
 # room_id 없이 업로드된 음성을 documents.conversation_id에 저장할 내부 값
@@ -28,7 +35,7 @@ VOICE_LIBRARY_ROOM_ID = "__voice_library__"
 # 8001 STT 서버 URL
 STT_BASE_URL = os.getenv(
     "STT_BASE_URL",
-    "http://192.168.0.245:8001"
+    "http://192.168.0.2:8001"
 )
 
 STT_PROCESS_URL = os.getenv(
@@ -347,7 +354,8 @@ async def upload_and_process_stt(
     3. 8001 응답 data 파싱
     4. documents 테이블 저장
     5. document_chunks 테이블 저장
-    6. 프론트에 document_id, file_id, transcription, metadata 반환
+    6. ChromaDB 적재
+    7. 프론트에 document_id, file_id, transcription, metadata 반환
 
     room_id가 있는 경우:
     - 해당 채팅방과 연결
@@ -453,9 +461,6 @@ async def upload_and_process_stt(
             )
 
         # 7. 채팅방 생성 또는 갱신
-        # room_id가 있을 때만 conversations에 반영한다.
-        # room_id 없이 업로드된 독립 음성은 최근 채팅 목록에 뜨지 않아야 하므로
-        # ensure_conversation()을 호출하지 않는다.
         if room_id:
             ensure_conversation(
                 conversation_id=room_id,
@@ -480,7 +485,6 @@ async def upload_and_process_stt(
         })
 
         # 9. document_chunks 테이블 저장
-        # 같은 document_id로 재처리될 수 있으므로 기존 chunk 삭제 후 저장
         delete_document_chunks(saved_document_id)
 
         saved_chunk_count = save_document_chunks(
@@ -488,7 +492,36 @@ async def upload_and_process_stt(
             transcription=transcription,
         )
 
-        # 10. 프론트 응답 반환
+        # 10. ChromaDB 적재
+        try:
+            doc_for_chroma = {
+                "id": saved_document_id,
+                "document_id": saved_document_id,
+                "title": result_filename or title,
+                "filename": result_filename or title,
+                "type": "voice",
+                "source": "voice",
+                "transcription": transcription,
+                "language": metadata.get("language", "ko"),
+                "created_at": "",
+                "status": "processed",
+                "notion_url": "",
+                "error": "",
+                "tags": [],
+                "importance_score": 0,
+            }
+
+            upload_context = _get_upload_context("voice")
+            base_meta = _build_base_meta(doc_for_chroma, db_room_id)
+            base_meta["document_id"] = saved_document_id
+
+            chroma_load_result = _load_voice(doc_for_chroma, base_meta, upload_context)
+            print(f"[stt_upload_service] ChromaDB 적재 결과: {chroma_load_result}")
+
+        except Exception as e:
+            print(f"[stt_upload_service] ChromaDB 적재 실패: {repr(e)}")
+
+        # 11. 프론트 응답 반환
         return _build_success_response(
             room_id=room_id,
             document_id=saved_document_id,
@@ -653,20 +686,6 @@ def get_stt_detail(document_id: str) -> dict:
 
 
 async def delete_stt_document(document_id: str) -> dict:
-    """
-    특정 음성 파일을 삭제한다.
-
-    프론트는 8000 서버에 document_id로 요청한다.
-    8000 서버는 metadata.original_file_url에서 audio_xxx 형태의 file_id를 추출해서
-    8001 DELETE /api/stt/{file_id}를 body 없이 URL path만으로 호출한다.
-
-    흐름:
-    1. 8000 DB에서 documents 조회
-    2. metadata.original_file_url에서 8001 file_id 추출
-    3. 8001 DELETE /api/stt/{file_id} 호출
-    4. 8000 DB에서 document_chunks 삭제
-    5. 8000 DB에서 documents 삭제
-    """
     try:
         document = get_document_by_id(document_id)
 
@@ -696,7 +715,6 @@ async def delete_stt_document(document_id: str) -> dict:
         stt_delete_error = None
 
         # 1. 8001 서버 원본 음성/json 삭제 요청
-        # Request Body 없이 URL path에 file_id만 넣어서 호출한다.
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.delete(stt_delete_url)
@@ -707,7 +725,15 @@ async def delete_stt_document(document_id: str) -> dict:
         except Exception as e:
             stt_delete_error = str(e)
 
-        # 2. 8000 DB 삭제
+        # 2. ChromaDB 벡터 삭제
+        try:
+            from backend.modules.rag.chroma_client import delete_document as chroma_delete_document
+            chroma_delete_document(document_id)
+            print(f"[stt_upload_service] ChromaDB 벡터 삭제 완료: {document_id}")
+        except Exception as e:
+            print(f"[stt_upload_service] ChromaDB 벡터 삭제 실패: {repr(e)}")
+
+        # 3. 8000 DB 삭제
         delete_document_chunks(document_id)
         db_deleted = delete_document(document_id)
 
