@@ -29,3 +29,7 @@ models/
 26.1.2
 3.0.0
 unsloth_compiled_cache/
+
+# RAG/finetune requirement파일
+requirements_finetune.txt
+requirements_rag.txt
