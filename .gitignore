@@ -13,6 +13,7 @@ test/
 # 데이터 파일
 data/raw/
 data/processed/
+data/knowledge/
 data/uploads/
 
 # 자동 생성 저장소
