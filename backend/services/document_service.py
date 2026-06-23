@@ -10,6 +10,7 @@ from backend.db.crud import (
     ensure_conversation,
     save_document_metadata,
     get_document_by_id,
+    get_tasks_by_document,
     delete_document,
     delete_document_chunks,
 )
@@ -122,6 +123,7 @@ def _safe_delete_local_file(file_path: str) -> bool:
 
     return False
 
+
 # 8003 문서 처리 서버에 원본 문서 파일 및 처리 결과 JSON 삭제를 요청
 def _delete_document_from_8003(document_id: str) -> dict:
     delete_url = f"{DOCUMENT_PROCESS_URL.rstrip('/')}/{document_id}"
@@ -216,6 +218,240 @@ def _save_processed_result_to_local_json(
 
     return str(local_json_path)
 
+
+def _load_document_json(json_path: str) -> dict:
+    """
+    8000 로컬에 저장된 문서 처리 결과 JSON을 읽는다.
+    """
+    if not json_path:
+        return {}
+
+    try:
+        path = Path(json_path)
+
+        if not path.exists() or not path.is_file():
+            return {}
+
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    except Exception as e:
+        print(f"[document_service] 문서 JSON 읽기 실패: {json_path} / {repr(e)}")
+        return {}
+
+
+def _extract_original_text(document: dict, document_json: dict) -> str:
+    """
+    문서 원문 전체 텍스트를 추출한다.
+
+    우선순위:
+    1. documents.content_markdown
+    2. JSON content_markdown
+    3. JSON content
+    4. JSON chunks[].text 또는 chunks[].content 합치기
+    """
+    content = (
+        document.get("content_markdown")
+        or document_json.get("content_markdown")
+        or document_json.get("content")
+        or ""
+    )
+
+    if content and content.strip():
+        return content
+
+    chunks = document_json.get("chunks") or []
+
+    if isinstance(chunks, list):
+        chunk_texts = []
+
+        for chunk in chunks:
+            if not isinstance(chunk, dict):
+                continue
+
+            text = chunk.get("content") or chunk.get("text") or ""
+
+            if text and text.strip():
+                chunk_texts.append(text.strip())
+
+        return "\n\n".join(chunk_texts)
+
+    return ""
+
+
+def _extract_keywords(document_json: dict) -> list[str]:
+    """
+    문서 처리 결과 JSON에서 키워드를 추출한다.
+
+    우선순위:
+    1. keywords
+    2. tags
+    3. metadata.keywords
+    4. metadata.tags
+
+    없으면 빈 배열을 반환한다.
+    """
+    metadata = document_json.get("metadata") or {}
+
+    keywords = (
+        document_json.get("keywords")
+        or document_json.get("tags")
+        or metadata.get("keywords")
+        or metadata.get("tags")
+        or []
+    )
+
+    if isinstance(keywords, str):
+        keyword = keywords.strip()
+        return [keyword] if keyword else []
+
+    if isinstance(keywords, list):
+        return [
+            str(keyword).strip()
+            for keyword in keywords
+            if str(keyword).strip()
+        ]
+
+    return []
+
+def _extract_chunks(document_json: dict) -> list[dict]:
+    """
+    로컬 JSON의 chunks 배열을 프론트 상세 조회용 구조로 변환한다.
+    """
+    chunks = document_json.get("chunks") or []
+
+    if not isinstance(chunks, list):
+        return []
+
+    result = []
+
+    for idx, chunk in enumerate(chunks):
+        if not isinstance(chunk, dict):
+            continue
+
+        content = chunk.get("content") or chunk.get("text") or ""
+
+        if not str(content).strip():
+            continue
+
+        metadata = chunk.get("metadata") or {}
+
+        # 8003 응답에서 font, size 등이 chunk 최상위에 올 수도 있어서 metadata에 같이 보존
+        for key in ["font", "size", "bbox", "confidence"]:
+            if key in chunk and key not in metadata:
+                metadata[key] = chunk.get(key)
+
+        result.append({
+            "chunk_index": chunk.get("chunk_index", idx),
+            "page_number": chunk.get("page_number"),
+            "content_type": (
+                chunk.get("content_type")
+                or chunk.get("type")
+                or chunk.get("style")
+                or "text"
+            ),
+            "content": str(content).strip(),
+            "style": chunk.get("style"),
+            "metadata": metadata,
+        })
+
+    return result
+
+
+def _extract_content_types(chunks: list[dict]) -> list[str]:
+    """
+    chunks에서 content_type 목록을 중복 없이 추출한다.
+    """
+    content_types = []
+
+    for chunk in chunks:
+        content_type = chunk.get("content_type")
+
+        if content_type and content_type not in content_types:
+            content_types.append(content_type)
+
+    return content_types
+
+
+def _extract_analysis_metadata(document_json: dict) -> dict:
+    """
+    문서 처리 결과 JSON의 metadata에서 분석 관련 값을 추출한다.
+    """
+    metadata = document_json.get("metadata") or {}
+
+    return {
+        "page_count": (
+            document_json.get("page_count")
+            or metadata.get("page_count")
+        ),
+        "language": (
+            document_json.get("language")
+            or metadata.get("language")
+        ),
+        "confidence_score": (
+            document_json.get("confidence_score")
+            or metadata.get("confidence_score")
+        ),
+        "engines": (
+            document_json.get("engines")
+            or metadata.get("engines")
+            or []
+        ),
+        "fallback_used": (
+            document_json.get("fallback_used")
+            if document_json.get("fallback_used") is not None
+            else metadata.get("fallback_used")
+        ),
+    }
+
+
+def _extract_organized_items(document_json: dict) -> dict:
+    """
+    문서 처리 결과 JSON에 정리된 항목이 있으면 추출한다.
+    없으면 빈 배열로 반환한다.
+    """
+    return {
+        "important_points": (
+            document_json.get("important_points")
+            or document_json.get("key_points")
+            or document_json.get("main_points")
+            or []
+        ),
+        "decisions": (
+            document_json.get("decisions")
+            or document_json.get("decision_items")
+            or []
+        ),
+    }
+
+# 문서 처리 결과에 summary가 비어 있을 때 사용하는 임시 요약 생성 함수
+# 추후에 LLM이 생성하면 대체
+def _make_fallback_summary(original_text: str, max_length: int = 500) -> str:
+    if not original_text:
+        return ""
+
+    text = original_text.strip()
+
+    if not text:
+        return ""
+
+    # 줄 단위로 나누고 빈 줄 제거
+    lines = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip()
+    ]
+
+    if not lines:
+        return text[:max_length]
+
+    # 너무 짧은 제목성 문장만 나오지 않도록 앞부분 여러 줄 사용
+    summary_text = " ".join(lines[:8])
+
+    if len(summary_text) > max_length:
+        return summary_text[:max_length].rstrip() + "..."
+
+    return summary_text
 
 # 문서 파일 처리
 # 프론트에서 받은 문서 파일을 8003 문서 처리 서버로 전달하고,
@@ -451,6 +687,110 @@ async def upload_and_process_document(
             message="문서 업로드 또는 처리 중 오류가 발생했습니다.",
             error=repr(e),
         )
+# 문서 상세 조회
+def get_document_detail(document_id: str) -> dict:
+    try:
+        # 1. 문서 기본 정보 조회
+        document = get_document_by_id(document_id)
+
+        if not document:
+            return {
+                "status": "error",
+                "document_id": document_id,
+                "document": None,
+                "message": "문서를 찾을 수 없습니다.",
+                "error": "document_not_found",
+            }
+
+        # 2. 8000 로컬 JSON 읽기
+        json_path = document.get("json_path") or ""
+        document_json = _load_document_json(json_path)
+
+        # 3. raw 데이터 구성
+        original_text = _extract_original_text(
+            document=document,
+            document_json=document_json,
+        )
+
+        chunks = _extract_chunks(document_json)
+
+        # 4. analysis 데이터 구성
+        keywords = _extract_keywords(document_json)
+        analysis_metadata = _extract_analysis_metadata(document_json)
+        content_types = _extract_content_types(chunks)
+
+        summary = (
+            document.get("summary")
+            or document_json.get("summary")
+            or _make_fallback_summary(original_text)
+        )
+
+        # 5. organized 데이터 구성
+        tasks = get_tasks_by_document(document_id)
+        organized_items = _extract_organized_items(document_json)
+
+        # 6. 프론트 상세 조회 응답 구성
+        return {
+            "status": "success",
+            "document_id": document_id,
+            "document": {
+                "document_id": document.get("id"),
+                "room_id": document.get("conversation_id"),
+                "filename": document.get("title"),
+                "type": document.get("type"),
+                "source": document.get("source"),
+                "status": document.get("status"),
+                "file_path": document.get("file_path"),
+                "json_path": document.get("json_path"),
+                "created_at": document.get("created_at"),
+
+                "raw": {
+                    "original_text": original_text,
+                    "chunks": chunks,
+                },
+
+                "analysis": {
+                    "summary": summary,
+                    "keywords": keywords,
+                    "page_count": analysis_metadata.get("page_count"),
+                    "content_types": content_types,
+                    "language": analysis_metadata.get("language"),
+                    "confidence_score": analysis_metadata.get("confidence_score"),
+                    "engines": analysis_metadata.get("engines"),
+                    "fallback_used": analysis_metadata.get("fallback_used"),
+                },
+
+                "organized": {
+                    "tasks": [
+                        {
+                            "task_id": task.get("id"),
+                            "document_id": task.get("document_id"),
+                            "room_id": task.get("conversation_id"),
+                            "task": task.get("task"),
+                            "assignee": task.get("assignee"),
+                            "deadline": task.get("deadline"),
+                            "status": task.get("status"),
+                            "priority": task.get("priority"),
+                            "created_at": task.get("created_at"),
+                        }
+                        for task in tasks
+                    ],
+                    "important_points": organized_items.get("important_points", []),
+                    "decisions": organized_items.get("decisions", []),
+                },
+            },
+            "message": "문서 상세 조회가 완료되었습니다.",
+            "error": None,
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "document_id": document_id,
+            "document": None,
+            "message": "문서 상세 조회 중 오류가 발생했습니다.",
+            "error": repr(e),
+        }
 
 # 문서 삭제 처리 함수
 # ChromaDB 삭제는 chroma_client에 삭제 함수가 준비되면 추가 연결

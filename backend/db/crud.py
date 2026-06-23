@@ -877,6 +877,37 @@ def get_tasks(conversation_id: str) -> list:
     return [dict(row) for row in rows]
 
 
+def get_tasks_by_document(document_id: str) -> list:
+    """
+    특정 문서에서 추출된 task 목록을 조회한다.
+    문서 상세 조회 API에서 사용한다.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT
+            id,
+            document_id,
+            conversation_id,
+            task,
+            assignee,
+            deadline,
+            status,
+            priority,
+            created_at
+        FROM tasks
+        WHERE document_id = ?
+        ORDER BY created_at DESC
+        """,
+        (document_id,),
+    )
+    rows = cursor.fetchall() or []
+    conn.close()
+
+    return [dict(row) for row in rows]
+
+
 def update_task_status(task_id: str, status: str) -> bool:
     conn = get_connection()
     cursor = conn.cursor()
