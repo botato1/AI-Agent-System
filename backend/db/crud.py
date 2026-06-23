@@ -521,6 +521,7 @@ def get_documents(conversation_id: str) -> list:
             source,
             summary,
             status,
+            chroma_status,
             created_at,
             json_path,
             metadata
@@ -556,6 +557,7 @@ def get_document_by_id(document_id: str) -> dict | None:
             content_markdown,
             summary,
             status,
+            chroma_status,
             notion_url,
             error,
             metadata,
@@ -586,6 +588,7 @@ def get_all_documents() -> list:
             conversation_id AS room_id,
             type,
             json_path,
+            chroma_status,
             metadata,
             created_at
         FROM documents
@@ -669,6 +672,7 @@ def _get_voice_documents(conversation_id: str | None = None) -> list[dict]:
                 file_path,
                 summary,
                 status,
+                chroma_status,
                 metadata,
                 created_at
             FROM documents
@@ -690,6 +694,7 @@ def _get_voice_documents(conversation_id: str | None = None) -> list[dict]:
                 file_path,
                 summary,
                 status,
+                chroma_status,
                 metadata,
                 created_at
             FROM documents
@@ -971,27 +976,6 @@ def delete_task(task_id: str) -> bool:
 def save_document_chunks(document_id: str, transcription: list[dict]) -> int:
     """
     STT transcription 결과를 document_chunks 테이블에 저장한다.
-
-    Args:
-        document_id:
-            documents.id 값
-
-        transcription:
-            STT 서버가 반환한 data.transcription 배열
-
-            예:
-            [
-                {
-                    "start": 0.52,
-                    "end": 2.15,
-                    "speaker": "SPEAKER_00",
-                    "text": "안녕하세요.",
-                    "user_edited": false
-                }
-            ]
-
-    Returns:
-        실제 저장된 chunk 개수
     """
     if not document_id or not transcription:
         return 0
@@ -1002,7 +986,6 @@ def save_document_chunks(document_id: str, transcription: list[dict]) -> int:
 
     for idx, seg in enumerate(transcription):
         content = seg.get("text") or ""
-        # 빈 발화는 저장하지 않음
         if not content.strip():
             continue
 
@@ -1112,6 +1095,7 @@ def delete_document_chunks(document_id: str) -> int:
     conn.close()
 
     return deleted
+
 
 def update_chroma_status(document_id: str, status: str) -> bool:
     """

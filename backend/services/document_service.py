@@ -13,6 +13,7 @@ from backend.db.crud import (
     get_tasks_by_document,
     delete_document,
     delete_document_chunks,
+    update_chroma_status,
 )
 from backend.modules.rag.document_loader import load_document
 from backend.modules.rag.chroma_client import delete_document as chroma_delete_document
@@ -97,6 +98,7 @@ def _build_error_response(
         "json_path": None,
         "summary": None,
         "chroma_load_result": None,
+        "chroma_status": None,
         "message": message,
         "error": error,
     }
@@ -515,6 +517,7 @@ async def _process_document_file(
             "json_path": processed_result.get("json_path") or "",
             "summary": summary,
             "chroma_load_result": None,
+            "chroma_status": None,
             "message": "8003 문서 처리 결과에 document_id가 없습니다.",
             "error": "document_id_missing",
         }
@@ -533,6 +536,7 @@ async def _process_document_file(
             "json_path": processed_result.get("json_path") or "",
             "summary": summary,
             "chroma_load_result": None,
+            "chroma_status": None,
             "message": "8003 문서 처리 결과에 content 또는 chunks가 없습니다.",
             "error": "document_content_missing",
         }
@@ -573,9 +577,19 @@ async def _process_document_file(
             document_id=saved_document_id,
             room_id=result_room_id,
         )
+
+        if chroma_load_result.get("status") == "success":
+            update_chroma_status(saved_document_id, "success")
+            chroma_status = "success"
+        else:
+            update_chroma_status(saved_document_id, "failed")
+            chroma_status = "failed"
+
         print(f"[document_service] ChromaDB 적재 결과: {chroma_load_result}")
 
     except Exception as e:
+        update_chroma_status(saved_document_id, "failed")
+        chroma_status = "failed"
         chroma_load_result = {
             "status": "error",
             "chunk_count": 0,
@@ -595,6 +609,7 @@ async def _process_document_file(
         "json_path": json_path,
         "summary": summary,
         "chroma_load_result": chroma_load_result,
+        "chroma_status": chroma_status,
         "message": "문서 처리, 메타데이터 저장 및 ChromaDB 적재 요청이 완료되었습니다.",
         "error": None,
     }
@@ -610,6 +625,7 @@ async def upload_and_process_document(
     - 8003 문서 처리 서버로 전달
     - 처리 결과를 받아 documents 테이블 저장
     - 저장 완료 후 document_loader.load_document()로 ChromaDB 적재
+    - ChromaDB 적재 결과에 따라 chroma_status 업데이트
     """
     filename = Path(file.filename).name if file and file.filename else "uploaded_file"
 
@@ -731,6 +747,7 @@ def get_document_detail(document_id: str) -> dict:
                 "type": document.get("type"),
                 "source": document.get("source"),
                 "status": document.get("status"),
+                "chroma_status": document.get("chroma_status"),
                 "file_path": document.get("file_path"),
                 "json_path": document.get("json_path"),
                 "created_at": document.get("created_at"),

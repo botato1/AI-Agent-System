@@ -17,6 +17,7 @@ from backend.db.crud import (
     get_document_chunks,
     get_all_voice_documents,
     delete_document,
+    update_chroma_status,
 )
 from backend.modules.rag.document_loader import (
     _load_voice,
@@ -24,7 +25,6 @@ from backend.modules.rag.document_loader import (
     _build_base_meta,
 )
 from backend.modules.rag.chroma_client import delete_document as chroma_delete_document
-
 
 
 # room_id 없이 업로드된 음성을 documents.conversation_id에 저장할 내부 값
@@ -288,6 +288,7 @@ def _build_success_response(
     saved_chunk_count: int,
     transcription: list,
     metadata: dict,
+    chroma_status: str,
 ) -> dict:
     duration_sec = _get_duration_sec(metadata)
     file_id = _resolve_stt_file_id(document_id, metadata)
@@ -304,6 +305,7 @@ def _build_success_response(
         "file_path": file_path,
         "summary": summary,
         "chunk_count": saved_chunk_count,
+        "chroma_status": chroma_status,
 
         # 프론트 분석 결과 페이지 즉시 이동용 필드
         "duration_sec": duration_sec,
@@ -333,6 +335,7 @@ def _build_error_response(
         "file_path": None,
         "summary": None,
         "chunk_count": 0,
+        "chroma_status": None,
         "duration_sec": None,
         "transcription": [],
         "metadata": None,
@@ -354,8 +357,8 @@ async def upload_and_process_stt(
     3. 8001 응답 data 파싱
     4. documents 테이블 저장
     5. document_chunks 테이블 저장
-    6. ChromaDB 적재
-    7. 프론트에 document_id, file_id, transcription, metadata 반환
+    6. ChromaDB 적재 및 chroma_status 업데이트
+    7. 프론트에 document_id, file_id, transcription, metadata, chroma_status 반환
 
     room_id가 있는 경우:
     - 해당 채팅방과 연결
@@ -370,8 +373,6 @@ async def upload_and_process_stt(
     """
     filename = Path(file.filename).name if file and file.filename else "uploaded_audio"
 
-    # documents.conversation_id는 NOT NULL이므로 내부 저장용 ID가 필요하다.
-    # 단, 이 값으로 conversations를 만들지는 않는다.
     db_room_id = room_id or VOICE_LIBRARY_ROOM_ID
 
     try:
@@ -437,7 +438,6 @@ async def upload_and_process_stt(
         transcription = data.get("transcription") or []
         metadata = data.get("metadata") or {}
 
-        # STT 서버가 data.language로 언어를 내려주는 경우 metadata에도 보존
         if data.get("language") and not metadata.get("language"):
             metadata["language"] = data.get("language")
 
@@ -516,9 +516,19 @@ async def upload_and_process_stt(
             base_meta["document_id"] = saved_document_id
 
             chroma_load_result = _load_voice(doc_for_chroma, base_meta, upload_context)
+
+            if chroma_load_result.get("status") == "success":
+                update_chroma_status(saved_document_id, "success")
+                chroma_status = "success"
+            else:
+                update_chroma_status(saved_document_id, "failed")
+                chroma_status = "failed"
+
             print(f"[stt_upload_service] ChromaDB 적재 결과: {chroma_load_result}")
 
         except Exception as e:
+            update_chroma_status(saved_document_id, "failed")
+            chroma_status = "failed"
             print(f"[stt_upload_service] ChromaDB 적재 실패: {repr(e)}")
 
         # 11. 프론트 응답 반환
@@ -532,6 +542,7 @@ async def upload_and_process_stt(
             saved_chunk_count=saved_chunk_count,
             transcription=transcription,
             metadata=metadata,
+            chroma_status=chroma_status,
         )
 
     except httpx.HTTPStatusError as e:
@@ -587,6 +598,7 @@ def get_stt_list() -> dict:
                 "source": row.get("source"),
                 "summary": row.get("summary") or "",
                 "status": row.get("status"),
+                "chroma_status": row.get("chroma_status"),
                 "file_path": row.get("file_path"),
                 "duration_sec": duration_sec,
                 "metadata": metadata,
@@ -661,6 +673,7 @@ def get_stt_detail(document_id: str) -> dict:
             "created_at": document.get("created_at"),
             "tags": metadata.get("tags") or ["voice_upload"],
             "status": document.get("status"),
+            "chroma_status": document.get("chroma_status"),
             "notion_url": document.get("notion_url"),
             "chroma_id": metadata.get("chroma_id"),
             "error": document.get("error"),
@@ -686,6 +699,17 @@ def get_stt_detail(document_id: str) -> dict:
 
 
 async def delete_stt_document(document_id: str) -> dict:
+    """
+    특정 음성 파일을 삭제한다.
+
+    흐름:
+    1. 8000 DB에서 documents 조회
+    2. metadata.original_file_url에서 8001 file_id 추출
+    3. 8001 DELETE /api/stt/{file_id} 호출
+    4. ChromaDB 벡터 삭제
+    5. 8000 DB에서 document_chunks 삭제
+    6. 8000 DB에서 documents 삭제
+    """
     try:
         document = get_document_by_id(document_id)
 
@@ -727,7 +751,6 @@ async def delete_stt_document(document_id: str) -> dict:
 
         # 2. ChromaDB 벡터 삭제
         try:
-            from backend.modules.rag.chroma_client import delete_document as chroma_delete_document
             chroma_delete_document(document_id)
             print(f"[stt_upload_service] ChromaDB 벡터 삭제 완료: {document_id}")
         except Exception as e:
