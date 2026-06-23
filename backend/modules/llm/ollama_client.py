@@ -501,7 +501,7 @@ def generate_answer_for_graph(
     # ── task_from_rag / task_from_memory ──
     if question_type in ("task_from_rag", "task_from_memory") and tasks:
         task_context = json.dumps(tasks, ensure_ascii=False, indent=2)
-        prompt = f"""
+        prompt = f"""[INST]
 {DOBY_SYSTEM_GUIDE}
 
 아래 추출된 할 일 목록을 보기 좋게 정리해줘.
@@ -517,12 +517,12 @@ def generate_answer_for_graph(
 
 할 일 목록:
 {task_context}
-"""
-        return generate_answer(prompt, context=task_context)
+[/INST]"""
+        return _call_ollama(prompt)
 
     # ── notion_save ──
     if question_type == "notion_save" and rag_context:
-        prompt = f"""
+        prompt = f"""[INST]
 {DOBY_SYSTEM_GUIDE}
 
 아래 참고 문서 내용을 Notion에 저장할 형태로 정리해줘.
@@ -532,10 +532,13 @@ def generate_answer_for_graph(
 - 핵심 내용만 간결하게 정리해라.
 - 한국어로 작성해라.
 
+[참고 문서]
+{rag_context}
+
 사용자 질문:
 {user_message}
-"""
-        return generate_answer(prompt, context=rag_context)
+[/INST]"""
+        return _call_ollama(prompt)
 
     # ── general_answer 또는 fallback ──
     prompt = f"""
@@ -560,7 +563,7 @@ def extract_tasks_from_content(content: str) -> list[dict]:
     if not content or not content.strip():
         return []
 
-    prompt = f"""
+    prompt = f"""[INST]
 아래 회의록 또는 문서에서 담당자별 할 일을 JSON 배열로만 추출해줘.
 
 [규칙]
@@ -581,9 +584,9 @@ def extract_tasks_from_content(content: str) -> list[dict]:
 {content}
 
 JSON:
-"""
+[/INST]"""
 
-    raw_answer = generate_answer(prompt, context=content)
+    raw_answer = _call_ollama(prompt)
     return _parse_json_array(raw_answer)
 
 
@@ -593,7 +596,7 @@ def generate_summary_for_notion(content: str) -> str | None:
     if not content or not content.strip():
         return None
 
-    prompt = f"""
+    prompt = f"""[INST]
 아래 원본 내용을 Notion에 함께 저장할 요약문으로 정리해줘.
 
 [규칙]
@@ -607,8 +610,8 @@ def generate_summary_for_notion(content: str) -> str | None:
 {content}
 
 요약:
-"""
-    return generate_answer(prompt, context=content)
+[/INST]"""
+    return _call_ollama(prompt)
 
 
 # ── 화자분리 보완 ─────────────────────────────────────────────
