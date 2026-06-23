@@ -1081,3 +1081,38 @@ def delete_document_chunks(document_id: str) -> int:
     conn.close()
 
     return deleted
+
+def update_chroma_status(document_id: str, status: str) -> bool:
+    """
+    documents 테이블의 chroma_status를 업데이트한다.
+    status: "pending" / "success" / "failed"
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE documents SET chroma_status = ? WHERE id = ?",
+        (status, document_id),
+    )
+    updated = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return updated > 0
+
+
+def get_documents_by_chroma_status(status: str) -> list:
+    """
+    chroma_status 기준으로 문서 목록 조회.
+    재시도 대상 조회: get_documents_by_chroma_status("failed")
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT id, conversation_id, title, type, source, json_path, chroma_status, created_at
+        FROM documents WHERE chroma_status = ? ORDER BY created_at DESC
+        """,
+        (status,),
+    )
+    rows = cursor.fetchall() or []
+    conn.close()
+    return [dict(row) for row in rows]

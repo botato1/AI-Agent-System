@@ -72,9 +72,10 @@ def init_db():
     """)
 
     # 5. documents
-    # 문서/PDF/STT 결과의 공통 메타데이터 저장 테이블.
-    # STT 상세 조회에서 duration_sec, model_used, original_file_url 등을
-    # 다시 내려줘야 하므로 metadata를 JSON 문자열로 저장한다.
+    # chroma_status: ChromaDB 적재 상태
+    #   pending → 적재 대기 (업로드 직후 기본값)
+    #   success → 적재 완료 (검색 가능)
+    #   failed  → 적재 실패 (재시도 필요)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS documents (
         id               TEXT PRIMARY KEY,
@@ -87,6 +88,7 @@ def init_db():
         content_markdown TEXT DEFAULT '',
         summary          TEXT,
         status           TEXT DEFAULT 'uploaded',
+        chroma_status    TEXT DEFAULT 'pending',
         notion_url       TEXT,
         error            TEXT,
         metadata         TEXT DEFAULT '{}',
@@ -110,13 +112,6 @@ def init_db():
     """)
 
     # 7. document_chunks
-    # STT 발화(transcription) 단위 저장이 1차 목적이나,
-    # start_time/end_time/speaker가 NULL 허용이라
-    # 추후 일반 문서 chunk 저장에도 쓸 수 있는 공용 테이블.
-    # 주의: 이 chunk_index는 발화 순서 기준이며,
-    #       ChromaDB 검색용 chunk_index(의미 단위 그룹)와는 다른 단위.
-    # FK 문법은 유지하되 PRAGMA foreign_keys 강제는 보류
-    # (기존 테이블들과의 일관성은 전체 DB 정책 논의 시 같이 결정).
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS document_chunks (
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -139,6 +134,8 @@ def init_db():
         "ALTER TABLE documents ADD COLUMN content_markdown TEXT DEFAULT ''",
         "ALTER TABLE documents ADD COLUMN metadata TEXT DEFAULT '{}'",
         "ALTER TABLE tasks ADD COLUMN priority TEXT DEFAULT 'medium'",
+        # chroma_status 추가: pending(적재 대기) / success(적재 완료) / failed(적재 실패)
+        "ALTER TABLE documents ADD COLUMN chroma_status TEXT DEFAULT 'pending'",
     ]
 
     for sql in migrations:
