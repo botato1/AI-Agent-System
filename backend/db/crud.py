@@ -521,6 +521,7 @@ def get_documents(conversation_id: str) -> list:
             source,
             summary,
             status,
+            chroma_status,
             created_at,
             json_path,
             metadata
@@ -556,6 +557,7 @@ def get_document_by_id(document_id: str) -> dict | None:
             content_markdown,
             summary,
             status,
+            chroma_status,
             notion_url,
             error,
             metadata,
@@ -575,6 +577,7 @@ def get_document_by_id(document_id: str) -> dict | None:
 def get_all_documents() -> list:
     """
     전체 문서 목록 조회.
+    voice 타입은 제외하고 document/meeting 타입만 반환한다.
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -586,9 +589,11 @@ def get_all_documents() -> list:
             conversation_id AS room_id,
             type,
             json_path,
+            chroma_status,
             metadata,
             created_at
         FROM documents
+        WHERE type != 'voice'
         ORDER BY created_at DESC
         """
     )
@@ -669,6 +674,7 @@ def _get_voice_documents(conversation_id: str | None = None) -> list[dict]:
                 file_path,
                 summary,
                 status,
+                chroma_status,
                 metadata,
                 created_at
             FROM documents
@@ -690,6 +696,7 @@ def _get_voice_documents(conversation_id: str | None = None) -> list[dict]:
                 file_path,
                 summary,
                 status,
+                chroma_status,
                 metadata,
                 created_at
             FROM documents
@@ -877,6 +884,37 @@ def get_tasks(conversation_id: str) -> list:
     return [dict(row) for row in rows]
 
 
+def get_tasks_by_document(document_id: str) -> list:
+    """
+    특정 문서에서 추출된 task 목록을 조회한다.
+    문서 상세 조회 API에서 사용한다.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT
+            id,
+            document_id,
+            conversation_id,
+            task,
+            assignee,
+            deadline,
+            status,
+            priority,
+            created_at
+        FROM tasks
+        WHERE document_id = ?
+        ORDER BY created_at DESC
+        """,
+        (document_id,),
+    )
+    rows = cursor.fetchall() or []
+    conn.close()
+
+    return [dict(row) for row in rows]
+
+
 def update_task_status(task_id: str, status: str) -> bool:
     conn = get_connection()
     cursor = conn.cursor()
@@ -940,27 +978,6 @@ def delete_task(task_id: str) -> bool:
 def save_document_chunks(document_id: str, transcription: list[dict]) -> int:
     """
     STT transcription 결과를 document_chunks 테이블에 저장한다.
-
-    Args:
-        document_id:
-            documents.id 값
-
-        transcription:
-            STT 서버가 반환한 data.transcription 배열
-
-            예:
-            [
-                {
-                    "start": 0.52,
-                    "end": 2.15,
-                    "speaker": "SPEAKER_00",
-                    "text": "안녕하세요.",
-                    "user_edited": false
-                }
-            ]
-
-    Returns:
-        실제 저장된 chunk 개수
     """
     if not document_id or not transcription:
         return 0
@@ -971,7 +988,6 @@ def save_document_chunks(document_id: str, transcription: list[dict]) -> int:
 
     for idx, seg in enumerate(transcription):
         content = seg.get("text") or ""
-        # 빈 발화는 저장하지 않음
         if not content.strip():
             continue
 
@@ -1081,3 +1097,39 @@ def delete_document_chunks(document_id: str) -> int:
     conn.close()
 
     return deleted
+
+
+def update_chroma_status(document_id: str, status: str) -> bool:
+    """
+    documents 테이블의 chroma_status를 업데이트한다.
+    status: "pending" / "success" / "failed"
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE documents SET chroma_status = ? WHERE id = ?",
+        (status, document_id),
+    )
+    updated = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return updated > 0
+
+
+def get_documents_by_chroma_status(status: str) -> list:
+    """
+    chroma_status 기준으로 문서 목록 조회.
+    재시도 대상 조회: get_documents_by_chroma_status("failed")
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT id, conversation_id, title, type, source, json_path, chroma_status, created_at
+        FROM documents WHERE chroma_status = ? ORDER BY created_at DESC
+        """,
+        (status,),
+    )
+    rows = cursor.fetchall() or []
+    conn.close()
+    return [dict(row) for row in rows]

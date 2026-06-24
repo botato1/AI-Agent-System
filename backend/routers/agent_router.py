@@ -6,45 +6,31 @@ from backend.schemas.agent_schema import AgentState
 from backend.graphs.agent_graph import agent_graph
 
 
-router = APIRouter(
-    prefix="/api/agent",
-    tags=["Agent"]
-)
+router = APIRouter(prefix="/api/agent", tags=["Agent"])
 
 
+# LangGraph Agent 흐름 테스트 API (실서비스용 /api/chat과 분리)
 @router.post("/run")
 def run_agent(user_message: str, room_id: str = "test_room"):
-    """
-    LangGraph Agent 흐름을 테스트하는 API
-
-    실제 서비스용 /api/chat과 분리해서,
-    AgentState가 graph를 통해 정상적으로 처리되는지 확인한다.
-    """
-
     initial_state: AgentState = {
         "room_id": room_id,
         "user_message": user_message,
         "source": "text",
         "created_at": datetime.now().isoformat(),
         "messages": [],
-
         "document_json": None,
-
         "memory_context": None,
         "rag_context": None,
         "sources": [],
-
-        "question_type": "general",
+        "question_type": "general_answer", 
         "need_general_answer": True,
         "need_memory": False,
         "need_rag": False,
         "need_task_extract": False,
         "need_notion_save": False,
-
         "summary": None,
         "tasks": [],
         "final_answer": None,
-
         "notion_result": None,
         "graph_data": None,
         "current_step": "agent_router",

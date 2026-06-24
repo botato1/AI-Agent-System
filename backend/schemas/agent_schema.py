@@ -15,6 +15,14 @@ class AgentState(TypedDict):
     # 3. 이전 대화 / RAG 검색 결과
     memory_context: Optional[str]
     rag_context: Optional[str]
+
+    # rag_service.retrieve_relevant_knowledge() 반환값 전체
+    # ollama_client.generate_answer_for_graph()의 rag_search_result 인자로 전달
+    rag_search_result: Optional[dict]
+
+    # 프론트 응답 / graph_data 표시용으로 유지
+    retrieved_docs: List[dict]
+    low_confidence: bool
     sources: List[dict]
 
     target_document_id: Optional[str]

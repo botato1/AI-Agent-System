@@ -2,9 +2,68 @@ from backend.schemas.agent_schema import AgentState
 from backend.services.ollama_service import ollama_service
 
 
-# LangGraph에서 문서 또는 대화 기반 할 일 추출을 담당하는 노드
+EMPTY_TASK_VALUES = {"할 일 없음", "없음", "해당 없음", "N/A", "null", "None"}
+
+# LLM이 추출한 tasks를 표준 구조로 정규화하고 빈 task를 제거
+def _clean_extracted_tasks(tasks: list, document_id: str | None = None, room_id: str | None = None) -> list:
+    if not tasks:
+        return []
+
+    cleaned_tasks = []
+
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+
+        task_text = (
+            task.get("task")
+            or task.get("title")
+            or task.get("content")
+            or task.get("할 일")
+            or task.get("업무")
+            or task.get("작업")
+            or task.get("다음 작업")
+            or task.get("내용")
+            or ""
+        )
+        task_text = str(task_text).strip()
+
+        if not task_text or task_text in EMPTY_TASK_VALUES:
+            continue
+
+        cleaned_tasks.append({
+            "task_id": task.get("task_id") or task.get("id") or f"task_{len(cleaned_tasks) + 1}",
+            "task": task_text,
+            "assignee": task.get("assignee") or task.get("담당자") or task.get("담당") or task.get("owner"),
+            "deadline": task.get("deadline") or task.get("마감일") or task.get("기한") or task.get("due_date") or task.get("due"),
+            "status": task.get("status") or task.get("상태") or "todo",
+            "priority": task.get("priority") or task.get("우선순위") or "medium",
+            "room_id": task.get("room_id") or room_id,
+            "document_id": task.get("document_id") or document_id,
+            "created_at": task.get("created_at"),
+        })
+
+    return cleaned_tasks
+
+
+# 할 일 추출에 사용할 source content를 우선순위에 따라 결정
+def _resolve_task_source(document_json: dict, rag_context: str, memory_context: str) -> str | None:
+    # 1. 일반 content 확인
+    if isinstance(document_json, dict) and document_json.get("content"):
+        return document_json.get("content")
+
+    # 2. RAG 컨텍스트 확인
+    if rag_context.strip():
+        return rag_context
+
+    # 3. 메모리 컨텍스트 확인
+    if memory_context.strip():
+        return memory_context
+
+    return None
+
+# 문서 또는 대화 기반 할 일 추출을 담당하는 LangGraph 노드
 def task_node(state: AgentState) -> AgentState:
-    # 할 일 추출이 필요 없으면 task_node 실행 건너뜀
     if not state.get("need_task_extract", False):
         return {
             **state,
@@ -17,20 +76,9 @@ def task_node(state: AgentState) -> AgentState:
     memory_context = state.get("memory_context") or ""
     document_json = state.get("document_json") or {}
 
-    # 문서/음성 JSON이 직접 들어온 경우 우선 사용
-    if document_json.get("content"):
-        source_content = document_json.get("content")
+    source_content = _resolve_task_source(document_json, rag_context, memory_context)
 
-    # 문서 context가 있으면 사용
-    elif rag_context.strip():
-        source_content = rag_context
-
-    # 이전 대화 기반 task 추출이 필요한 경우 memory 사용
-    elif memory_context.strip():
-        source_content = memory_context
-
-    else:
-        # 사용자 요청문만 보고 task를 만들지 않도록 방어
+    if not source_content:
         return {
             **state,
             "tasks": [],
@@ -39,12 +87,14 @@ def task_node(state: AgentState) -> AgentState:
         }
 
     try:
-        # 회의록/문서/메모리 내용에서 할 일 추출
-        tasks = ollama_service.extract_tasks_from_content(source_content)
+        extracted_tasks = ollama_service.extract_tasks_from_content(source_content) or []
 
-        # 로그인 기능이 없는 현재 구조에서는 현재 사용자를 식별할 수 없으므로
-        # 추출된 전체 담당자 업무를 자동 저장하지 않는다.
-        # 실제 저장은 사용자가 선택한 업무만 POST /api/tasks로 처리한다.
+        tasks = _clean_extracted_tasks(
+            tasks=extracted_tasks,
+            document_id=state.get("target_document_id"),
+            room_id=state.get("room_id"),
+        )
+
         return {
             **state,
             "tasks": tasks,
@@ -53,8 +103,6 @@ def task_node(state: AgentState) -> AgentState:
         }
 
     except Exception as e:
-        print(f"[task_node 에러]: {str(e)}")
-
         return {
             **state,
             "tasks": [],
