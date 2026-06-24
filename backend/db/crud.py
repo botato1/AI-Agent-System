@@ -577,6 +577,7 @@ def get_document_by_id(document_id: str) -> dict | None:
 def get_all_documents() -> list:
     """
     전체 문서 목록 조회.
+    voice 타입은 제외하고 document/meeting 타입만 반환한다.
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -592,6 +593,7 @@ def get_all_documents() -> list:
             metadata,
             created_at
         FROM documents
+        WHERE type != 'voice'
         ORDER BY created_at DESC
         """
     )
