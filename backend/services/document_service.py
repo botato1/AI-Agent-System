@@ -360,6 +360,22 @@ def _extract_chunks(document_json: dict) -> list[dict]:
 
     return result
 
+def _extract_tables_and_charts(document_json: dict) -> tuple[list, list]:
+    """
+    8003 응답에서 tables, charts를 추출한다.
+    최상위 tables/charts가 있으면 우선 사용하고,
+    없으면 page_results에서 수집한다.
+    """
+    tables = document_json.get("tables") or []
+    charts = document_json.get("charts") or []
+
+    if not tables and not charts:
+        page_results = document_json.get("page_results") or []
+        for page in page_results:
+            tables.extend(page.get("tables") or [])
+            charts.extend(page.get("charts") or [])
+
+    return tables, charts
 
 def _extract_content_types(chunks: list[dict]) -> list[str]:
     """
@@ -564,7 +580,6 @@ async def _process_document_file(
         "source": _get_source(result_filename),
         "file_path": file_path,
         "json_path": json_path,
-        "content_markdown": content_markdown,
         "summary": summary,
         "status": "processed",
         "notion_url": "",
@@ -720,6 +735,7 @@ def get_document_detail(document_id: str) -> dict:
         )
 
         chunks = _extract_chunks(document_json)
+        tables, charts = _extract_tables_and_charts(document_json)
 
         # 4. analysis 데이터 구성
         keywords = _extract_keywords(document_json)
@@ -755,6 +771,8 @@ def get_document_detail(document_id: str) -> dict:
                 "raw": {
                     "original_text": original_text,
                     "chunks": chunks,
+                    "tables": tables,
+                    "charts": charts,
                 },
 
                 "analysis": {
