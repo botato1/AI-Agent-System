@@ -72,12 +72,6 @@ def rag_node(state: AgentState) -> AgentState:
     elif not rag_filter and target_filename:
         rag_filter = {"filename": target_filename}
 
-    print(f"[rag_node] user_message: {user_message}")
-    print(f"[rag_node] question_type: {question_type}")
-    print(f"[rag_node] target_document_id: {target_document_id}")
-    print(f"[rag_node] target_filename: {target_filename}")
-    print(f"[rag_node] rag_filter: {rag_filter}")
-
     try:
         rag_result = rag_service.retrieve_relevant_knowledge(
             query=user_message,
@@ -119,8 +113,6 @@ def rag_node(state: AgentState) -> AgentState:
         }
 
     except Exception as e:
-        print(f"[rag_node 에러]: {str(e)}")
-
         error_result = {
             "status": "error",
             "query": user_message,

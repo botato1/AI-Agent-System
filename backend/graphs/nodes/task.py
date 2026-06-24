@@ -100,23 +100,18 @@ def task_node(state: AgentState) -> AgentState:
     document_json = state.get("document_json") or {}
 
     source_content = ""
-    source_type = ""
 
     if isinstance(document_json, dict) and document_json.get("content"):
         source_content = document_json.get("content") or ""
-        source_type = "document_json.content"
 
     elif isinstance(document_json, dict) and document_json.get("content_markdown"):
         source_content = document_json.get("content_markdown") or ""
-        source_type = "document_json.content_markdown"
 
     elif rag_context.strip():
         source_content = rag_context
-        source_type = "rag_context"
 
     elif memory_context.strip():
         source_content = memory_context
-        source_type = "memory_context"
 
     else:
         return {
