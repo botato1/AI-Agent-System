@@ -40,7 +40,7 @@ def get_task_list():
             "error": None,
         }
     except Exception as e:
-        return {"tasks": [], "error": "업무 목록 조회 중 오류가 발생했습니다."}
+        return {"tasks": [], "error": str(e)}
 
 
 # 업무 직접 생성
@@ -56,7 +56,7 @@ def create_task_api(request: TaskCreateRequest):
         return {"task": create_task({**task_data, "task": task_name}), "error": None}
 
     except Exception as e:
-        return {"task": None, "error": "업무 생성 중 오류가 발생했습니다."}
+        return {"task": None, "error": str(e)}
 
 
 # 업무 상태 변경
