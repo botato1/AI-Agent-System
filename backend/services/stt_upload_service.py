@@ -495,14 +495,6 @@ async def upload_and_process_stt(
                 error="stt_document_id_missing",
             )
 
-        if not content_markdown:
-            return _build_error_response(
-                room_id=room_id,
-                filename=result_filename,
-                message="STT 결과에서 content_markdown을 생성하지 못했습니다.",
-                error="stt_content_markdown_empty",
-            )
-
         # 7. 채팅방 생성 또는 갱신
         if room_id:
             ensure_conversation(
