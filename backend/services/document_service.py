@@ -13,8 +13,10 @@ from backend.db.crud import (
     get_tasks_by_document,
     delete_document,
     delete_document_chunks,
+    update_chroma_status,
 )
 from backend.modules.rag.document_loader import load_document
+from backend.modules.rag.chroma_client import delete_document as chroma_delete_document
 
 
 # 문서 처리 서버 8003
@@ -96,6 +98,7 @@ def _build_error_response(
         "json_path": None,
         "summary": None,
         "chroma_load_result": None,
+        "chroma_status": None,
         "message": message,
         "error": error,
     }
@@ -314,6 +317,7 @@ def _extract_keywords(document_json: dict) -> list[str]:
 
     return []
 
+
 def _extract_chunks(document_json: dict) -> list[dict]:
     """
     로컬 JSON의 chunks 배열을 프론트 상세 조회용 구조로 변환한다.
@@ -336,7 +340,6 @@ def _extract_chunks(document_json: dict) -> list[dict]:
 
         metadata = chunk.get("metadata") or {}
 
-        # 8003 응답에서 font, size 등이 chunk 최상위에 올 수도 있어서 metadata에 같이 보존
         for key in ["font", "size", "bbox", "confidence"]:
             if key in chunk and key not in metadata:
                 metadata[key] = chunk.get(key)
@@ -424,8 +427,7 @@ def _extract_organized_items(document_json: dict) -> dict:
         ),
     }
 
-# 문서 처리 결과에 summary가 비어 있을 때 사용하는 임시 요약 생성 함수
-# 추후에 LLM이 생성하면 대체
+
 def _make_fallback_summary(original_text: str, max_length: int = 500) -> str:
     if not original_text:
         return ""
@@ -435,7 +437,6 @@ def _make_fallback_summary(original_text: str, max_length: int = 500) -> str:
     if not text:
         return ""
 
-    # 줄 단위로 나누고 빈 줄 제거
     lines = [
         line.strip()
         for line in text.splitlines()
@@ -445,7 +446,6 @@ def _make_fallback_summary(original_text: str, max_length: int = 500) -> str:
     if not lines:
         return text[:max_length]
 
-    # 너무 짧은 제목성 문장만 나오지 않도록 앞부분 여러 줄 사용
     summary_text = " ".join(lines[:8])
 
     if len(summary_text) > max_length:
@@ -453,9 +453,7 @@ def _make_fallback_summary(original_text: str, max_length: int = 500) -> str:
 
     return summary_text
 
-# 문서 파일 처리
-# 프론트에서 받은 문서 파일을 8003 문서 처리 서버로 전달하고,
-# 8003 처리 결과를 documents 테이블에 저장한 뒤 ChromaDB에 적재한다.
+
 async def _process_document_file(
     file: UploadFile,
     room_id: str,
@@ -499,7 +497,6 @@ async def _process_document_file(
     file_path = processed_result.get("file_path") or ""
     summary = processed_result.get("summary") or ""
 
-    # 8003 응답에서는 content_markdown이 비어 있고 content에 전체 텍스트가 들어올 수 있음
     content_markdown = (
         processed_result.get("content_markdown")
         or processed_result.get("content")
@@ -520,11 +517,11 @@ async def _process_document_file(
             "json_path": processed_result.get("json_path") or "",
             "summary": summary,
             "chroma_load_result": None,
+            "chroma_status": None,
             "message": "8003 문서 처리 결과에 document_id가 없습니다.",
             "error": "document_id_missing",
         }
 
-    # content_markdown이 없더라도 chunks[]가 있으면 ChromaDB 적재는 가능하므로 통과
     has_content = bool(content_markdown.strip())
     has_chunks = isinstance(chunks, list) and len(chunks) > 0
 
@@ -539,15 +536,14 @@ async def _process_document_file(
             "json_path": processed_result.get("json_path") or "",
             "summary": summary,
             "chroma_load_result": None,
+            "chroma_status": None,
             "message": "8003 문서 처리 결과에 content 또는 chunks가 없습니다.",
             "error": "document_content_missing",
         }
 
-    # document_loader 또는 추후 조회에서 content_markdown으로도 접근할 수 있게 정리
     processed_result["content_markdown"] = content_markdown
 
     # 5. 8003 응답 JSON 전체를 8000 서버 로컬에 저장
-    #    SQLite에는 8003 서버의 Windows json_path가 아니라 8000 로컬 json_path를 저장한다.
     json_path = _save_processed_result_to_local_json(
         processed_result=processed_result,
         document_id=document_id,
@@ -576,16 +572,24 @@ async def _process_document_file(
     })
 
     # 8. SQLite 저장 완료 후 ChromaDB 적재
-    # document_loader는 documents.json_path를 다시 읽어서
-    # chunks[] / transcription[] 기반으로 ChromaDB에 저장한다.
     try:
         chroma_load_result = load_document(
             document_id=saved_document_id,
             room_id=result_room_id,
         )
+
+        if chroma_load_result.get("status") == "success":
+            update_chroma_status(saved_document_id, "success")
+            chroma_status = "success"
+        else:
+            update_chroma_status(saved_document_id, "failed")
+            chroma_status = "failed"
+
         print(f"[document_service] ChromaDB 적재 결과: {chroma_load_result}")
 
     except Exception as e:
+        update_chroma_status(saved_document_id, "failed")
+        chroma_status = "failed"
         chroma_load_result = {
             "status": "error",
             "chunk_count": 0,
@@ -605,6 +609,7 @@ async def _process_document_file(
         "json_path": json_path,
         "summary": summary,
         "chroma_load_result": chroma_load_result,
+        "chroma_status": chroma_status,
         "message": "문서 처리, 메타데이터 저장 및 ChromaDB 적재 요청이 완료되었습니다.",
         "error": None,
     }
@@ -620,6 +625,7 @@ async def upload_and_process_document(
     - 8003 문서 처리 서버로 전달
     - 처리 결과를 받아 documents 테이블 저장
     - 저장 완료 후 document_loader.load_document()로 ChromaDB 적재
+    - ChromaDB 적재 결과에 따라 chroma_status 업데이트
     """
     filename = Path(file.filename).name if file and file.filename else "uploaded_file"
 
@@ -687,7 +693,8 @@ async def upload_and_process_document(
             message="문서 업로드 또는 처리 중 오류가 발생했습니다.",
             error=repr(e),
         )
-# 문서 상세 조회
+
+
 def get_document_detail(document_id: str) -> dict:
     try:
         # 1. 문서 기본 정보 조회
@@ -740,6 +747,7 @@ def get_document_detail(document_id: str) -> dict:
                 "type": document.get("type"),
                 "source": document.get("source"),
                 "status": document.get("status"),
+                "chroma_status": document.get("chroma_status"),
                 "file_path": document.get("file_path"),
                 "json_path": document.get("json_path"),
                 "created_at": document.get("created_at"),
@@ -792,8 +800,7 @@ def get_document_detail(document_id: str) -> dict:
             "error": repr(e),
         }
 
-# 문서 삭제 처리 함수
-# ChromaDB 삭제는 chroma_client에 삭제 함수가 준비되면 추가 연결
+
 def delete_processed_document(document_id: str) -> dict:
     try:
         # 1. 삭제 대상 문서 조회
@@ -836,11 +843,19 @@ def delete_processed_document(document_id: str) -> dict:
         # 5. 8000에서 접근 가능한 원본 파일이면 삭제
         deleted_local_source_file = _safe_delete_local_file(file_path)
 
-        # 6. SQLite documents 삭제
+        # 6. ChromaDB 벡터 삭제
+        try:
+            chroma_delete_document(document_id)
+            chroma_deleted = True
+            print(f"[document_service] ChromaDB 벡터 삭제 완료: {document_id}")
+        except Exception as e:
+            chroma_deleted = False
+            print(f"[document_service] ChromaDB 벡터 삭제 실패: {repr(e)}")
+
+        # 7. SQLite documents 삭제
         deleted_document = delete_document(document_id)
 
-        # 7. 최종 상태 결정
-        # 8000 내부 삭제는 성공했지만 8003 삭제가 실패할 수 있으므로 상태를 분리한다.
+        # 8. 최종 상태 결정
         if document_server_result.get("status") == "success":
             final_status = "success"
             message = "문서 삭제가 완료되었습니다."
@@ -867,7 +882,7 @@ def delete_processed_document(document_id: str) -> dict:
                 "local_source_file": deleted_local_source_file,
                 "external_file": external_file_deleted,
                 "external_json": external_json_deleted,
-                "chroma": False,
+                "chroma": chroma_deleted,
             },
             "document_server_result": document_server_result,
             "error": error,
