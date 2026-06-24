@@ -48,15 +48,15 @@ def _clean_extracted_tasks(tasks: list, document_id: str | None = None, room_id:
 
 # 할 일 추출에 사용할 source content를 우선순위에 따라 결정
 def _resolve_task_source(document_json: dict, rag_context: str, memory_context: str) -> str | None:
+    # 1. 일반 content 확인
     if isinstance(document_json, dict) and document_json.get("content"):
         return document_json.get("content")
 
-    if isinstance(document_json, dict) and document_json.get("content_markdown"):
-        return document_json.get("content_markdown")
-
+    # 2. RAG 컨텍스트 확인
     if rag_context.strip():
         return rag_context
 
+    # 3. 메모리 컨텍스트 확인
     if memory_context.strip():
         return memory_context
 

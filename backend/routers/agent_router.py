@@ -22,7 +22,7 @@ def run_agent(user_message: str, room_id: str = "test_room"):
         "memory_context": None,
         "rag_context": None,
         "sources": [],
-        "question_type": "general",
+        "question_type": "general_answer", 
         "need_general_answer": True,
         "need_memory": False,
         "need_rag": False,
