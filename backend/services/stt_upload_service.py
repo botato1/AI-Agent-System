@@ -184,11 +184,68 @@ def _get_duration_sec(metadata: dict) -> float | None:
         return None
 
 
-def _extract_plain_content_from_markdown(content_markdown: str) -> str:
+def _load_stt_json(json_path: str) -> dict:
     """
-    상세 조회 응답의 content 필드용 전체 전사 텍스트를 만든다.
-    우선 content_markdown에서 '전체 전사 내용' 부분을 최대한 추출한다.
+    8000 로컬에 저장된 STT 결과 JSON을 읽는다.
     """
+    if not json_path:
+        return {}
+
+    try:
+        path = Path(json_path)
+
+        if not path.exists() or not path.is_file():
+            return {}
+
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    except Exception as e:
+        print(f"[stt_upload_service] STT JSON 읽기 실패: {json_path} / {repr(e)}")
+        return {}
+
+
+def _save_stt_result_to_local_json(
+    document_id: str,
+    content_markdown: str,
+    transcription: list,
+    metadata: dict,
+    title: str,
+    summary: str,
+) -> str:
+    """
+    STT 결과를 8000 서버 로컬 JSON 파일로 저장한다.
+    서버 이관 후 NAS 경로로 변경 예정.
+    """
+    local_json_dir = Path("data/uploads/voice")
+    local_json_dir.mkdir(parents=True, exist_ok=True)
+
+    local_json_path = local_json_dir / f"{document_id}.json"
+
+    stt_json = {
+        "id": document_id,
+        "title": title,
+        "type": "voice",
+        "source": "voice",
+        "content": content_markdown,
+        "content_markdown": content_markdown,
+        "transcription": transcription,
+        "metadata": metadata,
+        "summary": summary,
+    }
+
+    with open(local_json_path, "w", encoding="utf-8") as f:
+        json.dump(stt_json, f, ensure_ascii=False, indent=2)
+
+    return str(local_json_path)
+
+
+def _extract_plain_content_from_json(stt_json: dict) -> str:
+    """
+    로컬 JSON에서 전체 전사 텍스트를 추출한다.
+    """
+    content_markdown = stt_json.get("content_markdown") or stt_json.get("content") or ""
+
     if not content_markdown:
         return ""
 
@@ -229,10 +286,6 @@ def _chunks_to_transcription(chunks: list[dict]) -> list[dict]:
 def _extract_file_id_from_original_file_url(original_file_url: str | None) -> str | None:
     """
     8001 삭제 API에서 사용하는 file_id를 original_file_url에서 추출한다.
-
-    예:
-    http://localhost:8001/uploads/audio_3b686ce18a994bc8a3b00d71ff5f4727.wav
-    -> audio_3b686ce18a994bc8a3b00d71ff5f4727
     """
     if not original_file_url:
         return None
@@ -355,21 +408,11 @@ async def upload_and_process_stt(
     1. 프론트에서 받은 음성 파일 검증
     2. 8001 STT 서버로 파일 전달
     3. 8001 응답 data 파싱
-    4. documents 테이블 저장
-    5. document_chunks 테이블 저장
-    6. ChromaDB 적재 및 chroma_status 업데이트
-    7. 프론트에 document_id, file_id, transcription, metadata, chroma_status 반환
-
-    room_id가 있는 경우:
-    - 해당 채팅방과 연결
-    - conversations 생성/갱신
-    - 최근 채팅 목록에 표시될 수 있음
-
-    room_id가 없는 경우:
-    - conversations 생성/갱신 안 함
-    - documents.conversation_id에는 내부 값 "__voice_library__" 저장
-    - 최근 채팅 목록에 표시되지 않음
-    - 음성 목록 GET /api/stt/list에는 표시됨
+    4. STT 결과 로컬 JSON 저장 (서버 이관 후 NAS 경로로 변경 예정)
+    5. documents 테이블 저장
+    6. document_chunks 테이블 저장
+    7. ChromaDB 적재 및 chroma_status 업데이트
+    8. 프론트에 document_id, file_id, transcription, metadata, chroma_status 반환
     """
     filename = Path(file.filename).name if file and file.filename else "uploaded_audio"
 
@@ -467,7 +510,17 @@ async def upload_and_process_stt(
                 title=result_filename,
             )
 
-        # 8. documents 테이블 저장
+        # 8. STT 결과 로컬 JSON 저장
+        stt_json_path = _save_stt_result_to_local_json(
+            document_id=document_id,
+            content_markdown=content_markdown,
+            transcription=transcription,
+            metadata=metadata,
+            title=result_filename or title,
+            summary=summary,
+        )
+
+        # 9. documents 테이블 저장
         saved_document_id = save_document_metadata({
             "id": document_id,
             "conversation_id": db_room_id,
@@ -475,8 +528,7 @@ async def upload_and_process_stt(
             "type": "voice",
             "source": "voice",
             "file_path": file_path,
-            "json_path": "",
-            "content_markdown": content_markdown,
+            "json_path": stt_json_path,
             "summary": summary,
             "status": status,
             "notion_url": data.get("notion_url") or "",
@@ -484,7 +536,7 @@ async def upload_and_process_stt(
             "metadata": json.dumps(metadata, ensure_ascii=False),
         })
 
-        # 9. document_chunks 테이블 저장
+        # 10. document_chunks 테이블 저장
         delete_document_chunks(saved_document_id)
 
         saved_chunk_count = save_document_chunks(
@@ -492,7 +544,7 @@ async def upload_and_process_stt(
             transcription=transcription,
         )
 
-        # 10. ChromaDB 적재
+        # 11. ChromaDB 적재
         try:
             doc_for_chroma = {
                 "id": saved_document_id,
@@ -531,7 +583,7 @@ async def upload_and_process_stt(
             chroma_status = "failed"
             print(f"[stt_upload_service] ChromaDB 적재 실패: {repr(e)}")
 
-        # 11. 프론트 응답 반환
+        # 12. 프론트 응답 반환
         return _build_success_response(
             room_id=room_id,
             document_id=saved_document_id,
@@ -624,7 +676,7 @@ def get_stt_list() -> dict:
 def get_stt_detail(document_id: str) -> dict:
     """
     특정 음성 파일의 상세 정보와 발화 단위 전사 결과를 조회한다.
-    8000 DB의 documents, document_chunks 기준으로 조회한다.
+    8000 DB의 documents, document_chunks, 로컬 JSON 기준으로 조회한다.
     """
     try:
         document = get_document_by_id(document_id)
@@ -651,8 +703,11 @@ def get_stt_detail(document_id: str) -> dict:
         metadata = _safe_json_loads(document.get("metadata"))
         file_id = _resolve_stt_file_id(document_id, metadata)
 
-        content_markdown = document.get("content_markdown") or ""
-        content = _extract_plain_content_from_markdown(content_markdown)
+        # 로컬 JSON에서 content_markdown 읽기
+        json_path = document.get("json_path") or ""
+        stt_json = _load_stt_json(json_path)
+        content_markdown = stt_json.get("content_markdown") or ""
+        content = _extract_plain_content_from_json(stt_json)
 
         conversation_id = document.get("conversation_id")
         room_id = None if _is_voice_library_room_id(conversation_id) else conversation_id
@@ -707,8 +762,9 @@ async def delete_stt_document(document_id: str) -> dict:
     2. metadata.original_file_url에서 8001 file_id 추출
     3. 8001 DELETE /api/stt/{file_id} 호출
     4. ChromaDB 벡터 삭제
-    5. 8000 DB에서 document_chunks 삭제
-    6. 8000 DB에서 documents 삭제
+    5. 8000 로컬 JSON 파일 삭제
+    6. 8000 DB에서 document_chunks 삭제
+    7. 8000 DB에서 documents 삭제
     """
     try:
         document = get_document_by_id(document_id)
@@ -733,6 +789,7 @@ async def delete_stt_document(document_id: str) -> dict:
 
         metadata = _safe_json_loads(document.get("metadata"))
         file_id = _resolve_stt_file_id(document_id, metadata)
+        json_path = document.get("json_path") or ""
 
         stt_delete_url = f"{STT_BASE_URL}/api/stt/{file_id}"
 
@@ -756,7 +813,17 @@ async def delete_stt_document(document_id: str) -> dict:
         except Exception as e:
             print(f"[stt_upload_service] ChromaDB 벡터 삭제 실패: {repr(e)}")
 
-        # 3. 8000 DB 삭제
+        # 3. 로컬 JSON 파일 삭제
+        if json_path:
+            try:
+                local_path = Path(json_path)
+                if local_path.exists() and local_path.is_file():
+                    local_path.unlink()
+                    print(f"[stt_upload_service] 로컬 JSON 삭제 완료: {json_path}")
+            except Exception as e:
+                print(f"[stt_upload_service] 로컬 JSON 삭제 실패: {repr(e)}")
+
+        # 4. 8000 DB 삭제
         delete_document_chunks(document_id)
         db_deleted = delete_document(document_id)
 
