@@ -333,12 +333,20 @@ def delete_document(doc_id: str, collection_name: str | None = None):
     for col_name in targets:
         try:
             collection = get_or_create_collection(col_name)
-            collection.delete(ids=[doc_id])
-            _remove_from_bm25_index(col_name, doc_id)
-            print(f"[삭제 완료] {col_name}: {doc_id}")
+            result = collection.get(
+                where={"document_id": doc_id},
+                include=[],
+            )
+            chunk_ids = result.get("ids", [])
+            if chunk_ids:
+                collection.delete(ids=chunk_ids)
+                for cid in chunk_ids:
+                    _remove_from_bm25_index(col_name, cid)
+                print(f"[삭제 완료] {col_name}: document_id={doc_id}, 청크 {len(chunk_ids)}개 삭제")
+            else:
+                print(f"[삭제 스킵] {col_name}: document_id={doc_id} 해당 청크 없음")
         except Exception as e:
-            print(f"[삭제 에러] {col_name}: {doc_id}, error: {e}")
-
+            print(f"[삭제 에러] {col_name}: document_id={doc_id}, error: {e}")
 
 if __name__ == "__main__":
     print("ChromaDB 연결 확인 중...")
