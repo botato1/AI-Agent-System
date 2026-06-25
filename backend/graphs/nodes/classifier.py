@@ -63,12 +63,11 @@ def _detect_notion_save(message: str, message_lower: str) -> bool:
     return is_notion and has_action
 
 
-def _resolve_question_type(question_type: str, has_document_target: bool, mentions_document_target: bool,
-    mentions_task: bool, mentions_knowledge: bool, mentions_memory_target: bool, mentions_notion_save: bool) -> str:
+def _resolve_question_type(question_type: str, has_document_target: bool, mentions_document_target: bool, mentions_task: bool,
+    mentions_knowledge: bool, mentions_memory_target: bool, mentions_notion_save: bool) -> str:
     if mentions_notion_save:
         return "notion_save"
 
-    # knowledge_search를 task_from_rag보다 먼저 확인
     if (
         has_document_target
         and mentions_document_target
@@ -79,6 +78,10 @@ def _resolve_question_type(question_type: str, has_document_target: bool, mentio
 
     if has_document_target and mentions_document_target and mentions_task:
         return "task_from_rag"
+
+    # task_from_rag인데 문서 타겟이 없으면 general_answer로 보정
+    if question_type == "task_from_rag" and not has_document_target and not mentions_document_target:
+        return "general_answer"
 
     if question_type == "task_from_memory" and not mentions_memory_target:
         return "general_answer"
