@@ -11,6 +11,8 @@ import Graph from './pages/Graph'
 import Voice from './pages/Voice'
 import VoiceAnalysis from './pages/VoiceAnalysis'
 
+const BASE_URL = import.meta.env.VITE_API_URL
+
 type ToastType = 'success' | 'error' | 'info'
 interface ToastContextType {
   showToast: (message: string, type?: ToastType) => void
@@ -21,6 +23,8 @@ interface SttResult {
   duration: number
   segments: { speaker: string; start: number; end: number; text: string; user_edited: boolean }[]
   fileName: string
+  chromaStatus: 'success' | 'pending' | 'failed'
+  originalFileUrl: string | null
 }
 
 export const ToastContext = createContext<ToastContextType>({ showToast: () => {} })
@@ -45,7 +49,7 @@ export default function App() {
   const [sttResult, setSttResult] = useState<SttResult | null>(null)
 
   const [docViewMode, setDocViewMode] = useState<'list' | 'original' | 'analysis'>('list')
-  const [selectedDocId, setSelectedDocId] = useState<number | null>(null)
+  const [selectedDocId, setSelectedDocId] = useState<string | null>(null)
 
   const [documentAnalysisData, setDocumentAnalysisData] = useState<any>(null)
 
@@ -80,21 +84,47 @@ export default function App() {
         />
       )
       case 'pipeline': return (
-        <Pipeline
-          onGoToAnalysis={() => setActivePage('documentanalysis')}
-          reviewFileName={reviewFileName}
-          onClearReview={() => setReviewFileName(null)}
-          onRoomCreated={() => setSidebarRefreshKey(prev => prev + 1)}
-          onFileUploaded={(filename, analysisData) => {
-            console.log('파일명 세팅:', filename)
-            setTargetFilename(filename)
-            setDocumentAnalysisData(analysisData)
-          }}
-          onRoomIdCreated={(roomId) => setTargetRoomId(roomId)}
-          onUploadStart={(filename) => setUploadingFile(filename)}
-          onUploadEnd={() => setUploadingFile(null)}
-        />
-      )
+  <Pipeline
+    onGoToAnalysis={() => setActivePage('documentanalysis')}
+    reviewFileName={reviewFileName}
+    onClearReview={() => setReviewFileName(null)}
+    onRoomCreated={() => setSidebarRefreshKey(prev => prev + 1)}
+    onFileUploaded={async (filename, uploadData) => {
+      console.log('파일명 세팅:', filename)
+      setTargetFilename(filename)
+
+      // 업로드 응답엔 analysis/organized가 없어서, 상세조회 API로 한 번 더 받아옴
+      // (보관함 DocumentAnalysis.tsx가 쓰는 것과 같은 API라 필드 모양이 동일해짐)
+      try {
+        const res = await fetch(`${BASE_URL}/api/documents/${uploadData.document_id}`)
+        const data = await res.json()
+        if (data.status === 'success') {
+          setDocumentAnalysisData({
+            ...data.document,
+            chroma_status: uploadData.chroma_status, // 상세조회엔 없는 필드라 업로드 응답 값 유지
+          })
+        } else {
+          // 상세조회 실패해도 업로드 자체는 됐으니 최소 정보로 표시
+          setDocumentAnalysisData({
+            filename: uploadData.filename,
+            document_id: uploadData.document_id,
+            chroma_status: uploadData.chroma_status,
+          })
+        }
+      } catch (err) {
+        console.error('문서 상세조회 실패:', err)
+        setDocumentAnalysisData({
+          filename: uploadData.filename,
+          document_id: uploadData.document_id,
+          chroma_status: uploadData.chroma_status,
+        })
+      }
+    }}
+    onRoomIdCreated={(roomId) => setTargetRoomId(roomId)}
+    onUploadStart={(filename) => setUploadingFile(filename)}
+    onUploadEnd={() => setUploadingFile(null)}
+  />
+)
       case 'documents': return (
         <Documents
           selectedDocId={selectedDocId}
@@ -128,7 +158,15 @@ export default function App() {
       )
       case 'tasks': return <Tasks />
       case 'settings': return <Settings />
-      case 'graph': return <Graph onGoToAnalysis={() => setActivePage('documentanalysis')} />
+      case 'graph': return (
+  <Graph
+    onGoToAnalysis={(documentId) => {
+      setSelectedDocId(documentId)
+      setDocViewMode('analysis')
+      setActivePage('documents')
+    }}
+  />
+)
       case 'voice': return voicePage === 'result'
         ? <VoiceAnalysis
             fileId={selectedVoiceId!}
