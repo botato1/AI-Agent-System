@@ -107,7 +107,7 @@ def update_conversation_timestamp(conversation_id: str):
 def get_conversations() -> list:
     """
     전체 채팅방 목록을 최신순으로 조회한다.
-    각 채팅방의 최근 문서 제목도 함께 조회한다.
+    각 채팅방의 최근 문서 제목과 document_id도 함께 조회한다.
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -118,7 +118,8 @@ def get_conversations() -> list:
             c.title,
             c.created_at,
             c.updated_at,
-            d.title AS filename
+            d.title AS filename,
+            d.id AS document_id
         FROM conversations c
         LEFT JOIN documents d
             ON d.id = (
