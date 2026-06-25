@@ -35,25 +35,23 @@ interface Props {
   onGoToAnalysis?: () => void
 }
 
-const TASKS_KEY = 'chatTasks'     //채팅방별 업무 목록 저장 키
-const ADDED_KEY = 'addedTaskIds'  //이미 추가한 업무 ID 집합 저장 키
+const TASKS_KEY = 'chatTasks'
+const ADDED_KEY = 'addedTaskIds'
 
-// 채팅방의 업무 목록을 localStorage에 저장 (중복 방지 포함)
+// 새로고침해도 유지되도록 채팅방별 업무 목록을 localStorage에 저장 (task_id 기준 중복 제거)
 const saveRoomTasks = (roomId: string, tasks: ChatTask[]) => {
   try {
     const all = JSON.parse(localStorage.getItem(TASKS_KEY) ?? '{}')
-    const existing: ChatTask[] = all[roomId] ?? [] //localStorage에 이미 있던 업무 목록 꺼내오기
-    const merged = [...existing]                   
-    //task_id 기준 중복 없는 것만 추가
+    const existing: ChatTask[] = all[roomId] ?? []
+    const merged = [...existing]
     tasks.forEach(t => {
-      if (!merged.find(e => e.task_id === t.task_id)) merged.push(t) //existing을 복사한 배열에서 시작해서, 새로 온 tasks 중 tasks_id가 안겹피는 것만 뒤에 추가
+      if (!merged.find(e => e.task_id === t.task_id)) merged.push(t)
     })
     all[roomId] = merged
     localStorage.setItem(TASKS_KEY, JSON.stringify(all))
   } catch {}
 }
 
-//localStorage에서 특정 채팅방의 업무 목록 불러오기
 const loadRoomTasks = (roomId: string): ChatTask[] => {
   try {
     const all = JSON.parse(localStorage.getItem(TASKS_KEY) ?? '{}')
@@ -61,14 +59,12 @@ const loadRoomTasks = (roomId: string): ChatTask[] => {
   } catch { return [] }
 }
 
-//"업무 추가" 버튼을 누른 task_id 집합을 localStorage에 저장
 const saveAddedIds = (ids: Set<string>) => {
   try {
     localStorage.setItem(ADDED_KEY, JSON.stringify([...ids]))
   } catch {}
 }
 
-//localStorage에서 추가된 task_id 집합 불러오기
 const loadAddedIds = (): Set<string> => {
   try {
     const saved = localStorage.getItem(ADDED_KEY)
@@ -83,7 +79,8 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
   const [addedTaskIds, setAddedTaskIds] = useState<Set<string>>(loadAddedIds)
   const bottomRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
-  const loadingRef = useRef(false)  // loading 최신값 ref로 추적
+  // loading state는 비동기라 useEffect 안에서 즉시 참조가 안 되므로 ref로 동기 추적
+  const loadingRef = useRef(false)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -94,7 +91,8 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
       setMessages([])
       return
     }
-    // 채팅 전송 중일 때는 메시지 초기화 안 함
+    // 전송 처리 중에는 handleSend에서 setActiveRoomId가 호출되면서 이 effect도 같이 실행됨
+    // → 이때 메시지를 덮어쓰면 방금 보낸 메시지가 사라지므로 가드
     if (loadingRef.current) return
 
     fetch(`${BASE_URL}/api/conversations/${activeRoomId}/messages`)
@@ -105,6 +103,8 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
           role: m.role as 'user' | 'assistant',
           text: m.content,
         }))
+        // 업무 목록은 백엔드 메시지 응답에 포함되지 않아 localStorage에서 복원,
+        // 가장 최근 assistant 메시지에 다시 매칭
         const roomTasks = loadRoomTasks(activeRoomId)
         if (roomTasks.length > 0) {
           const lastAssistantIdx = [...msgs].reverse().findIndex(m => m.role === 'assistant')
@@ -141,7 +141,7 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
           status: 'todo',
           priority: task.priority ?? 'medium',
           room_id: activeRoomId,
-          document_id: null,
+          document_id: null, // 채팅 기반 업무는 특정 문서와 연결하지 않음
         }),
       })
       if (!res.ok) throw new Error()
@@ -162,14 +162,13 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
 
     setInput('')
     setLoading(true)
-    loadingRef.current = true  // ref도 같이 업데이트
+    loadingRef.current = true
 
-    // roomId 먼저 확보
     let roomId = activeRoomId
     if (!roomId) {
       try {
         roomId = await createRoom(userText)
-        setActiveRoomId(roomId)  // 이 시점에 useEffect 트리거되지만 loadingRef.current=true라 초기화 안 됨
+        setActiveRoomId(roomId)
         onRoomCreated()
       } catch {
         setLoading(false)
@@ -178,7 +177,6 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
       }
     }
 
-    // roomId 확보 후 메시지 추가
     const loadingMsgId = `loading_${Date.now()}`
     setMessages(prev => [
       ...prev,
@@ -214,6 +212,7 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
       )
     } catch (err: any) {
       if (err.name === 'AbortError') {
+        // 사용자가 직접 중지한 경우는 에러로 취급하지 않고 로딩 메시지만 제거
         setMessages(prev => prev.filter(m => m.id !== loadingMsgId))
       } else {
         setMessages(prev =>
@@ -226,7 +225,7 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
       }
     } finally {
       setLoading(false)
-      loadingRef.current = false  // ref 초기화
+      loadingRef.current = false
       onRoomCreated()
     }
   }
@@ -299,9 +298,11 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
                     ? <span className="animate-pulse text-gray-400">응답 생성 중...</span>
                     : msg.role === 'user'
                       ? msg.text
-                      : <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-0.5 prose-li:my-0 prose-ul:my-1 prose-ol:my-1 [&_*]:text-gray-700 dark:[&_*]:text-gray-200">
+                      : (
+                        <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-0.5 prose-li:my-0 prose-ul:my-1 prose-ol:my-1 [&_*]:text-gray-700 dark:[&_*]:text-gray-200">
                           <ReactMarkdown>{msg.text}</ReactMarkdown>
                         </div>
+                      )
                   }
                 </div>
 
