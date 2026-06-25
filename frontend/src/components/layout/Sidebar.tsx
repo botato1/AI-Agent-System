@@ -155,7 +155,7 @@ export default function Sidebar({ activePage, onPageChange, isDark, onToggleDark
             )}
 
             {!chatCollapsed && (
-              <div className="flex flex-col max-h-64 overflow-y-auto">
+              <div className="flex flex-col max-h-64 overflow-y-auto [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-thumb]:bg-gray-600 [&::-webkit-scrollbar-thumb:hover]:bg-gray-400 dark:[&::-webkit-scrollbar-thumb:hover]:bg-gray-500 [&::-webkit-scrollbar-thumb:active]:bg-gray-400 dark:[&::-webkit-scrollbar-thumb:active]:bg-gray-500 [&::-webkit-scrollbar-track]:bg-transparent">
                 {recentChats.map((chat) => (
                   <div
                     key={chat.room_id}
