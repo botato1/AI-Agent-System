@@ -8,6 +8,7 @@ from backend.routers.notion_router import router as notion_router
 from backend.routers.agent_router import router as agent_router
 from backend.routers.task_router import router as task_router
 from backend.routers.stt_router import router as stt_router
+from backend.modules.rag.chroma_client import warm_up_reranker
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(
@@ -26,6 +27,9 @@ app.add_middleware(
 
 # 서버 실행 시 SQLite DB 테이블 자동 생성
 init_db()
+
+# 서버 시작 시 리랭커 모델 미리 로딩
+warm_up_reranker()
 
 app.include_router(chat_router)
 app.include_router(rag_router)
