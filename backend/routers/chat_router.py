@@ -76,6 +76,7 @@ def get_chat_rooms():
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
             "filename": row.get("filename"),
+            "document_id": row.get("document_id"),
         }
         for row in rows
     ]
