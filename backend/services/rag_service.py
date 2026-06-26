@@ -20,8 +20,8 @@ from backend.modules.rag.chroma_client import (
 CANDIDATE_K  = 40
 SCALE_FACTOR = 0.0005
 
-# 8개 질문 실측 기준: 관련있음 0.7~0.99, 무관 0.3 미만
-LOW_CONFIDENCE_THRESHOLD = 0.3
+# 8개 질문 실측 기준: 관련있음 0.6~0.99, 무관 0.4 미만
+LOW_CONFIDENCE_THRESHOLD = 0.4
 
 MEETING_SIGNALS = [
     "회의록", "회의", "저번에", "저번", "말했던", "논의했던", "논의",
