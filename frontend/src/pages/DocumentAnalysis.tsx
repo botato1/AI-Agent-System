@@ -29,47 +29,90 @@ export default function Analysis({ analysisData, onReview, onGoToChat, onBack }:
   const { showToast } = useToast()
   const [activeTab, setActiveTab] = useState(0) //활성화 탭 기본은 요약 탭
 
+  const buildSummaryPoints = () =>
+  analysisData?.analysis?.summary
+    ? analysisData.analysis.summary.split('\n').filter((s: string) => s.trim())
+    : ['요약 데이터가 없습니다.']
+
   //PDF 다운로드 jsPDF+나눔고딕
-  const handleDownload = () => {
-    const doc = new jsPDF()
-    doc.addFileToVFS('NanumGothic.ttf', NanumGothicBase64)
-    doc.addFont('NanumGothic.ttf', 'NanumGothic', 'normal')
-    doc.setFont('NanumGothic')
-    doc.setFontSize(18)
-    doc.text('마케팅 전략 회의 분석 보고서', 20, 20)
-    doc.setFontSize(11)
-    doc.text('회의 일시: 2024.05.20 (월) 14:00', 20, 35)
-    doc.text('회의 시간: 1시간 32분', 20, 43)
-    doc.save('마케팅전략회의_분석보고서.pdf')
-  }
+const handleDownload = () => {
+  const doc = new jsPDF()
+  doc.addFileToVFS('NanumGothic.ttf', NanumGothicBase64)
+  doc.addFont('NanumGothic.ttf', 'NanumGothic', 'normal')
+  doc.setFont('NanumGothic')
 
-  // DOCX 다운로드: docx 라이브러리로 Word 문서 생성
-  const handleDownloadDocx = async () => {
-     const doc = new Document({
-      sections: [{
-        children: [
-          new Paragraph({
-            text: '마케팅 전략 회의 분석 보고서',
-            heading: HeadingLevel.HEADING_1
-          }),
-          new Paragraph({
-            children: [
-              new TextRun({ text: '회의 일시: 2024.05.20 (월) 14:00', size: 22 })
-            ]
-          }),
-        ]
-      }]
-    })
-    const blob = await Packer.toBlob(doc) // 문서를 Blob으로 변환 
-    saveAs(blob, '마케팅전략회의_분석보고서.docx')
-  }
+  doc.setFontSize(18)
+  doc.text(`${analysisData?.filename ?? '문서'} 분석 보고서`, 20, 20)
 
-  //TXT 다운로드
-  const handleDownloadTxt = () => {
-    const content = `마케팅 전략 회의 분석 보고서\n회의 일시: 2024.05.20 (월) 14:00`
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
-    saveAs(blob, '마케팅전략회의_분석보고서.txt')
-  }
+  doc.setFontSize(11)
+  doc.text(
+    `생성일: ${analysisData?.created_at ? new Date(analysisData.created_at).toLocaleDateString('ko-KR') : '-'}`,
+    20, 33
+  )
+  doc.text(
+    `페이지 수: ${analysisData?.analysis?.page_count ?? '-'}`,
+    20, 41
+  )
+
+  let y = 53
+  doc.setFontSize(13)
+  doc.text('문서 요약', 20, y)
+  y += 8
+  doc.setFontSize(10)
+  buildSummaryPoints().forEach((point: string) => {
+    doc.text(`- ${point}`, 22, y)
+    y += 7
+  })
+
+  doc.save(`${analysisData?.filename ?? '분석'}_분석보고서.pdf`)
+}
+
+
+ // DOCX 다운로드: docx 라이브러리로 Word 문서 생성
+const handleDownloadDocx = async () => {
+  const doc = new Document({
+    sections: [{
+      children: [
+        new Paragraph({
+          text: `${analysisData?.filename ?? '문서'} 분석 보고서`,
+          heading: HeadingLevel.HEADING_1
+        }),
+        new Paragraph({
+          children: [new TextRun({
+            text: `생성일: ${analysisData?.created_at ? new Date(analysisData.created_at).toLocaleDateString('ko-KR') : '-'}`,
+            size: 22
+          })]
+        }),
+        new Paragraph({
+          children: [new TextRun({
+            text: `페이지 수: ${analysisData?.analysis?.page_count ?? '-'}`,
+            size: 22
+          })]
+        }),
+        new Paragraph({ text: '문서 요약', heading: HeadingLevel.HEADING_2 }),
+        ...buildSummaryPoints().map((point: string) =>
+          new Paragraph({ children: [new TextRun({ text: `• ${point}`, size: 20 })] })
+        ),
+      ]
+    }]
+  })
+  const blob = await Packer.toBlob(doc)
+  saveAs(blob, `${analysisData?.filename ?? '분석'}_분석보고서.docx`)
+}
+
+//TXT 다운로드
+const handleDownloadTxt = () => {
+  const content = [
+    `${analysisData?.filename ?? '문서'} 분석 보고서`,
+    `생성일: ${analysisData?.created_at ? new Date(analysisData.created_at).toLocaleDateString('ko-KR') : '-'}`,
+    `페이지 수: ${analysisData?.analysis?.page_count ?? '-'}`,
+    '',
+    '문서 요약',
+    ...buildSummaryPoints().map((p: string) => `- ${p}`),
+  ].join('\n')
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+  saveAs(blob, `${analysisData?.filename ?? '분석'}_분석보고서.txt`)
+}
 
   //공유 (현재 페이지 url 복사)
   const handleShare = () => {
@@ -82,7 +125,7 @@ const renderTab = () => {
   switch (activeTab) {
     case 0: return <TabSummary analysisData={analysisData}/>
     case 1: return <TabOriginal analysisData={analysisData}/>
-    case 2: return <TabTasks />
+    case 2: return <TabTasks analysisData={analysisData}/>
     case 3: return <TabRelated />
     default: return <TabSummary />
   }
@@ -98,14 +141,20 @@ const renderTab = () => {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-lg font-bold text-gray-800 dark:text-white">
-                {analysisData?.title ?? '마케팅 전략 회의'}
+                {analysisData?.filename ?? '제목 없음'}
               </h1>
               <span className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 px-2 py-0.5 rounded-full font-medium">분석 완료</span>
+              {analysisData?.chroma_status === 'failed' && (
+                <span className="text-xs bg-red-50 dark:bg-red-900/30 text-red-400 px-2 py-0.5 rounded-full font-medium">AI 분석 실패</span>
+              )}
+              {analysisData?.chroma_status === 'pending' && (
+                <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-400 px-2 py-0.5 rounded-full font-medium">분석 준비 중</span>
+              )}
             </div>
             <p className="text-xs text-gray-400 mt-0.5">
               {analysisData?.created_at
-              ? new Date(analysisData.created_at).toLocaleDateString('ko-KR')
-              : '2024.05.20 (월) 14:00'}
+                ? new Date(analysisData.created_at).toLocaleDateString('ko-KR')
+                : '-'}
             </p>
           </div>
         </div>

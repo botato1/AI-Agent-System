@@ -7,11 +7,12 @@ interface HomeProps {
   activeRoomId: string | null
   setActiveRoomId: (id: string | null) => void
   targetFilename: string | null
-  onGoToAnalysis?: () => void
+  targetDocumentId?: string | null      // ← 추가
+  onGoToAnalysis?: (documentId: string | null) => void  // ← 파라미터 추가
   onClearFilename?: () => void
 }
 
-export default function Home({ onRoomCreated, activeRoomId, setActiveRoomId, targetFilename, onGoToAnalysis, onClearFilename }: HomeProps) {
+export default function Home({ onRoomCreated, activeRoomId, setActiveRoomId, targetFilename, targetDocumentId, onGoToAnalysis, onClearFilename }: HomeProps) {
   return (
     <div className="flex flex-col h-[calc(100vh-48px)]">
       <div className="flex items-center justify-between mb-4">
@@ -35,6 +36,7 @@ export default function Home({ onRoomCreated, activeRoomId, setActiveRoomId, tar
           setActiveRoomId={setActiveRoomId}
           onRoomCreated={onRoomCreated}
           targetFilename={targetFilename}
+          targetDocumentId={targetDocumentId}
           onGoToAnalysis={onGoToAnalysis}
         />
       </div>
