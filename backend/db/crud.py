@@ -1134,3 +1134,55 @@ def get_documents_by_chroma_status(status: str) -> list:
     rows = cursor.fetchall() or []
     conn.close()
     return [dict(row) for row in rows]
+
+def get_tasks_by_document(document_id: str) -> list:
+    """
+    특정 문서에서 추출된 task 목록을 조회한다.
+    문서 상세 조회 API에서 사용한다.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT
+            id, document_id, conversation_id,
+            task, assignee, deadline, status, priority, created_at
+        FROM tasks
+        WHERE document_id = ?
+        ORDER BY created_at DESC
+        """,
+        (document_id,),
+    )
+    rows = cursor.fetchall() or []
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def get_documents_by_room_id(room_id: str) -> list:
+    """
+    room_document_links 기반으로 방에 연결된 문서 목록 조회.
+    rag_service에서 호출하는 함수명과 일치시키기 위한 별칭.
+    """
+    return get_documents_by_room_id_v2(room_id)
+
+
+def get_document_by_title_and_room(room_id: str, title: str) -> dict | None:
+    """
+    room_id + title로 특정 문서 조회.
+    질문에 특정 문서 제목이 언급된 경우 사용.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT d.id, d.title, d.type, d.source, d.chroma_status, d.created_at
+        FROM room_document_links rdl
+        JOIN documents d ON d.id = rdl.document_id
+        WHERE rdl.room_id = ? AND d.title LIKE ?
+        ORDER BY rdl.created_at DESC LIMIT 1
+        """,
+        (room_id, f"%{title}%"),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
