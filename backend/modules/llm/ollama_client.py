@@ -575,6 +575,7 @@ def generate_answer_for_graph(
         return _call_ollama(prompt)
 
     # ── task_from_rag / task_from_memory ──
+    if question_type in ("task_from_rag", "task_from_memory") and tasks:
         task_context = json.dumps(tasks, ensure_ascii=False, indent=2)
         prompt = f"""[INST]
 {DOBY_SYSTEM_GUIDE}
@@ -585,6 +586,9 @@ def generate_answer_for_graph(
 - 담당자, 할 일, 마감일이 있으면 구분해서 정리해라.
 - 없는 정보는 임의로 만들지 마라.
 - 마감일 형식은 가능한 한 통일해서 보여줘라.
+- 인사말(안녕하세요 등)로 시작하지 마라.
+- 마무리 문구(도움이 되셨으면 합니다 등)로 끝내지 마라.
+- 인사말 없이 바로 핵심 내용부터 답변해라.
 - 답변은 한국어로 작성해라.
 
 사용자 질문:
@@ -592,6 +596,32 @@ def generate_answer_for_graph(
 
 할 일 목록:
 {task_context}
+[/INST]"""
+        return _call_ollama(prompt)
+
+    # ── summary_from_rag ──
+    if question_type == "summary_from_rag" and rag_context:
+        trimmed_context = rag_context[:12000]
+        prompt = f"""[INST]
+{DOBY_SYSTEM_GUIDE}
+
+아래 [참고 문서]는 사용자가 업로드한 문서 또는 회의록입니다.
+[참고 문서]이 비어 있지 않다면 절대 "참고 문서가 없다"고 말하지 마세요.
+
+[참고 문서]
+{trimmed_context}
+
+[사용자 질문]
+{user_message}
+
+[답변 규칙]
+- 반드시 [참고 문서]만 근거로 요약하세요.
+- 참고 문서에 없는 내용은 추가하지 마세요.
+- 핵심 주제, 주요 결론, 중요 수치나 이름 위주로 정리하세요.
+- 인사말(안녕하세요 등)로 시작하지 마세요.
+- 마무리 문구(도움이 되셨으면 합니다 등)로 끝내지 마세요.
+- 인사말 없이 바로 핵심 내용부터 답변하세요.
+- 답변은 한국어로 작성하세요.
 [/INST]"""
         return _call_ollama(prompt)
 
