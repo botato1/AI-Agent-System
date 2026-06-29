@@ -13,6 +13,7 @@ from backend.db.crud import (
     delete_document,
     delete_document_chunks,
     update_chroma_status,
+    link_document_to_room,
 )
 from backend.modules.rag.document_loader import load_document
 from backend.modules.rag.chroma_client import delete_document as chroma_delete_document
@@ -390,7 +391,7 @@ async def _process_document_file(file: UploadFile, room_id: str | None, document
         "notion_url": "",
         "error": "",
     })
-
+    
     try:
         chroma_load_result = load_document(document_id=saved_document_id, room_id=result_room_id or "")
         chroma_status = "success" if chroma_load_result.get("status") == "success" else "failed"
@@ -401,6 +402,11 @@ async def _process_document_file(file: UploadFile, room_id: str | None, document
         chroma_load_result = {"status": "error", "chunk_count": 0, "document_id": saved_document_id, "error": repr(e)}
         update_chroma_status(saved_document_id, "failed")
         print(f"[document_service] ChromaDB 적재 실패: {repr(e)}")
+
+    # room_id가 있으면 room_document_links에 연결 추가 (ChromaDB 성공 여부와 무관)
+    if result_room_id:
+        link_document_to_room(result_room_id, saved_document_id)
+        print(f"[document_service] room_document_links 연결 완료: {result_room_id} → {saved_document_id}")
 
     return {
         "status": "success",

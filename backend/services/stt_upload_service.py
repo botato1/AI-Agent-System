@@ -16,6 +16,7 @@ from backend.db.crud import (
     get_all_voice_documents,
     delete_document,
     update_chroma_status,
+    link_document_to_room,
 )
 from backend.modules.rag.document_loader import (
     _load_voice,
@@ -387,6 +388,11 @@ async def upload_and_process_stt(file: UploadFile, room_id: str | None = None) -
             chroma_status = "failed"
             update_chroma_status(saved_document_id, "failed")
             print(f"[stt_upload_service] ChromaDB 적재 실패: {repr(e)}")
+
+        # room_id가 있으면 room_document_links에 연결 추가
+        if room_id:
+            link_document_to_room(room_id, saved_document_id)
+            print(f"[stt_upload_service] room_document_links 연결 완료: {room_id} → {saved_document_id}")
 
         return _build_success_response(
             room_id=room_id,
