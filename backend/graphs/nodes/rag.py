@@ -59,6 +59,7 @@ def _resolve_rag_filter(state: AgentState) -> dict | None:
 
 # RAG 검색을 수행하고 결과를 AgentState에 저장하는 LangGraph 노드
 def rag_node(state: AgentState) -> AgentState:
+    print(f"[rag_node] 진입 / need_rag: {state.get('need_rag')} / question_type: {state.get('question_type')}")
     if not state.get("need_rag", False):
         return {
             **state,
@@ -82,6 +83,7 @@ def rag_node(state: AgentState) -> AgentState:
             top_k=5,
             filter=rag_filter,
             question_type=question_type,
+            room_id=state.get("room_id", ""),
         )
 
         retrieved_docs = rag_result.get("data") or []
