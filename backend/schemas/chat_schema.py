@@ -19,6 +19,7 @@ class ChatRequest(BaseModel):
     # 프론트에서 선택한 문서 식별값
     target_document_id: Optional[str] = None
     target_filename: Optional[str] = None
+    target_document_ids: Optional[List[str]] = None
 
 
 # DB에 저장되거나 DB에서 조회되는 메시지의 구조

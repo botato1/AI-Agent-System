@@ -8,19 +8,12 @@ from backend.schemas.agent_schema import AgentState
 from backend.db.crud import (
     insert_message,
     get_messages,
-    get_latest_document_by_conversation,
-    get_document_by_filename_and_conversation,
+    get_documents,
 )
 from backend.graphs.agent_graph import agent_graph
 
 
 # 상수
-DOCUMENT_REFERENCE_KEYWORDS = [
-    "이 문서", "이 파일", "이 자료", "이 회의록", "이 음성",
-    "방금 올린", "방금 업로드", "첨부한", "업로드한",
-    "문서에서", "파일에서", "자료에서", "회의록에서", "음성에서",
-    "해당 문서", "해당 파일", "해당 자료", "해당 회의록", "해당 음성",
-]
 
 STATUS_MAP = {
     "todo": "todo", "할일": "todo", "할 일": "todo",
@@ -40,14 +33,6 @@ PRIORITY_MAP = {
     "medium": "medium", "보통": "medium", "중간": "medium", "중": "medium", "일반": "medium",
     "low": "low", "낮음": "low", "하": "low", "여유": "low",
 }
-
-# 헬퍼 함수
-# 사용자가 특정 문서/파일/음성/회의록을 가리키는 질문인지 확인
-def is_document_reference_message(message: str) -> bool:
-    if not message:
-        return False
-
-    return any(keyword in message for keyword in DOCUMENT_REFERENCE_KEYWORDS)
 
 # numpy 타입을 Python 기본 타입으로 변환
 def to_json_safe(value):
@@ -183,22 +168,7 @@ def normalize_tasks(tasks: list | None) -> list[dict]:
 
 # 프론트 요청에서 target_document_id와 target_filename을 결정
 def _resolve_target_document(request: ChatRequest) -> tuple[str | None, str | None]:
-    target_document_id = request.target_document_id
-    target_filename = request.target_filename
-
-    if not target_document_id and target_filename:
-        matched = get_document_by_filename_and_conversation(request.room_id, target_filename)
-        if matched:
-            target_document_id = matched.get("id")
-            target_filename = matched.get("title")
-
-    if not target_document_id and not target_filename and is_document_reference_message(request.content):
-        latest = get_latest_document_by_conversation(request.room_id)
-        if latest:
-            target_document_id = latest.get("id")
-            target_filename = latest.get("title")
-
-    return target_document_id, target_filename
+    return request.target_document_id, request.target_filename
 
 # AgentState를 프론트 응답 형식으로 변환
 def build_chat_response(state: AgentState) -> ChatResponseSchema:
@@ -238,13 +208,19 @@ def run_agent_graph(state: AgentState) -> AgentState:
 
 # AgentState 초기화
 def create_initial_state(request: ChatRequest, messages: list | None = None) -> AgentState:
-    """ChatRequest를 LangGraph에서 사용할 AgentState로 변환한다."""
     target_document_id, target_filename = _resolve_target_document(request)
+    target_document_ids = request.target_document_ids or []
+
+    documents = get_documents(request.room_id)
 
     if target_document_id:
         rag_filter = {"document_id": target_document_id}
     elif target_filename:
         rag_filter = {"filename": target_filename}
+    elif target_document_ids:
+        rag_filter = {"document_ids": target_document_ids}
+    elif documents:
+        rag_filter = {"room_id": request.room_id}
     else:
         rag_filter = None
 

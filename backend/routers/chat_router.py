@@ -13,11 +13,18 @@ from backend.db.crud import (
     get_conversation_by_id,
     get_documents,
     delete_all_conversations_and_messages,
+    link_document_to_room,
+    unlink_document_from_room,
+    get_documents_by_room_id,
 )
 
 
 class ConversationCreateRequest(BaseModel):
     title: str = "새 대화"
+
+
+class RoomDocumentRequest(BaseModel):
+    document_id: str
 
 
 router = APIRouter(
@@ -76,6 +83,7 @@ def get_chat_rooms():
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
             "filename": row.get("filename"),
+            "document_id": row.get("document_id"),
         }
         for row in rows
     ]
@@ -86,7 +94,6 @@ def get_chat_rooms():
 
 
 # 모든 채팅방과 메시지 전체 삭제 API
-# 실제 경로: DELETE /api/conversations
 @router.delete("/conversations")
 def remove_all_chat_rooms():
     result = delete_all_conversations_and_messages()
@@ -181,5 +188,61 @@ def remove_message(message_id: str):
         "status": "success",
         "message_id": message_id,
         "message": "메시지가 삭제되었습니다.",
+        "error": None,
+    }
+
+
+# 채팅방에 연결된 문서 목록 조회 API
+@router.get("/rooms/{room_id}/documents")
+def get_room_documents(room_id: str):
+    docs = get_documents_by_room_id(room_id)
+    return {
+        "status": "success",
+        "room_id": room_id,
+        "documents": [
+            {
+                "document_id": doc["id"],
+                "title": doc["title"],
+                "type": doc["type"],
+                "source": doc["source"],
+                "chroma_status": doc.get("chroma_status"),
+                "created_at": doc["created_at"],
+            }
+            for doc in docs
+        ],
+        "error": None,
+    }
+
+
+# 채팅방에 문서 연결 API
+@router.post("/rooms/{room_id}/documents")
+def add_document_to_room(room_id: str, request: RoomDocumentRequest):
+    link_document_to_room(room_id, request.document_id)
+    return {
+        "status": "success",
+        "room_id": room_id,
+        "document_id": request.document_id,
+        "message": "문서가 채팅방에 연결되었습니다.",
+        "error": None,
+    }
+
+
+# 채팅방에서 문서 연결 해제 API
+@router.delete("/rooms/{room_id}/documents/{document_id}")
+def remove_document_from_room(room_id: str, document_id: str):
+    unlinked = unlink_document_from_room(room_id, document_id)
+    if not unlinked:
+        return {
+            "status": "error",
+            "room_id": room_id,
+            "document_id": document_id,
+            "message": "연결된 문서를 찾을 수 없습니다.",
+            "error": "link_not_found",
+        }
+    return {
+        "status": "success",
+        "room_id": room_id,
+        "document_id": document_id,
+        "message": "문서 연결이 해제되었습니다.",
         "error": None,
     }

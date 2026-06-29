@@ -13,21 +13,19 @@ from backend.db.crud import (
     delete_document,
     delete_document_chunks,
     update_chroma_status,
+    link_document_to_room,
 )
 from backend.modules.rag.document_loader import load_document
 from backend.modules.rag.chroma_client import delete_document as chroma_delete_document
 
 
-# 8003 문서 처리 서버 URL (업로드: POST /api/document, 삭제: DELETE /api/document/{id})
+# 8003 문서 처리 서버 URL
 DOCUMENT_PROCESS_URL = os.getenv(
     "DOCUMENT_PROCESS_URL",
     "http://220.90.180.93:8003/api/document"
 )
 
-# 8003에서 처리 가능한 문서 확장자
 ALLOWED_DOCUMENT_EXTENSIONS = {".pdf", ".hwpx", ".png", ".jpg", ".jpeg"}
-
-# 음성 파일 확장자 (문서 업로드 API로 잘못 들어온 경우 차단용)
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".webm"}
 
 
@@ -61,8 +59,9 @@ def _get_source(filename: str) -> str:
 
 
 # 응답 빌더
+
 def _build_error_response(
-    room_id: str,
+    room_id: str | None,
     filename: str,
     document_type: str,
     message: str,
@@ -86,7 +85,6 @@ def _build_error_response(
 
 # 로컬 파일 처리
 
-# 8000 서버에서 접근 가능한 로컬 파일이면 삭제 (8003 Windows 경로는 접근 불가라 False 반환)
 def _safe_delete_local_file(file_path: str) -> bool:
     if not file_path:
         return False
@@ -102,7 +100,6 @@ def _safe_delete_local_file(file_path: str) -> bool:
     return False
 
 
-# 8003 응답 JSON을 8000 로컬에 저장하고 로컬 경로를 반환 (서버 이관 후 NAS 경로로 변경 예정)
 def _save_processed_result_to_local_json(processed_result: dict, document_id: str) -> str:
     local_json_dir = Path("data/uploads/documents")
     local_json_dir.mkdir(parents=True, exist_ok=True)
@@ -117,7 +114,6 @@ def _save_processed_result_to_local_json(processed_result: dict, document_id: st
     return str(local_json_path)
 
 
-# 8000 로컬에 저장된 문서 처리 결과 JSON을 읽는다
 def _load_document_json(json_path: str) -> dict:
     if not json_path:
         return {}
@@ -137,7 +133,6 @@ def _load_document_json(json_path: str) -> dict:
 
 # 8003 서버 연동
 
-# 8003 서버에 원본 문서 파일 및 처리 결과 JSON 삭제 요청
 def _delete_document_from_8003(document_id: str) -> dict:
     delete_url = f"{DOCUMENT_PROCESS_URL.rstrip('/')}/{document_id}"
     error_base = {
@@ -184,7 +179,6 @@ def _delete_document_from_8003(document_id: str) -> dict:
 
 # 데이터 추출 함수
 
-# 문서 원문 전체 텍스트 추출 (content_markdown → content → chunks 순서로 fallback)
 def _extract_original_text(document: dict, document_json: dict) -> str:
     content = (
         document.get("content_markdown")
@@ -209,7 +203,6 @@ def _extract_original_text(document: dict, document_json: dict) -> str:
     return ""
 
 
-# keywords → tags → metadata 순서로 키워드 추출
 def _extract_keywords(document_json: dict) -> list[str]:
     metadata = document_json.get("metadata") or {}
     keywords = (
@@ -229,7 +222,6 @@ def _extract_keywords(document_json: dict) -> list[str]:
     return []
 
 
-# chunks 배열을 프론트 상세 조회용 구조로 변환
 def _extract_chunks(document_json: dict) -> list[dict]:
     chunks = document_json.get("chunks") or []
 
@@ -264,7 +256,7 @@ def _extract_chunks(document_json: dict) -> list[dict]:
 
     return result
 
-# 최상위 tables/charts 없으면 page_results에서 수집
+
 def _extract_tables_and_charts(document_json: dict) -> tuple[list, list]:
     tables = document_json.get("tables") or []
     charts = document_json.get("charts") or []
@@ -277,7 +269,6 @@ def _extract_tables_and_charts(document_json: dict) -> tuple[list, list]:
     return tables, charts
 
 
-# chunks에서 content_type 목록을 중복 없이 추출
 def _extract_content_types(chunks: list[dict]) -> list[str]:
     content_types = []
     for chunk in chunks:
@@ -287,7 +278,6 @@ def _extract_content_types(chunks: list[dict]) -> list[str]:
     return content_types
 
 
-# metadata에서 분석 관련 값 추출
 def _extract_analysis_metadata(document_json: dict) -> dict:
     metadata = document_json.get("metadata") or {}
     return {
@@ -303,7 +293,6 @@ def _extract_analysis_metadata(document_json: dict) -> dict:
     }
 
 
-# important_points, decisions 추출 (없으면 빈 배열)
 def _extract_organized_items(document_json: dict) -> dict:
     return {
         "important_points": (
@@ -320,7 +309,6 @@ def _extract_organized_items(document_json: dict) -> dict:
     }
 
 
-# 원문 앞부분을 요약으로 사용하는 fallback 요약 생성
 def _make_fallback_summary(original_text: str, max_length: int = 500) -> str:
     if not original_text:
         return ""
@@ -336,15 +324,19 @@ def _make_fallback_summary(original_text: str, max_length: int = 500) -> str:
 
 # 문서 업로드 처리
 
-async def _process_document_file(file: UploadFile, room_id: str, document_type: str) -> dict:
+async def _process_document_file(file: UploadFile, room_id: str | None, document_type: str) -> dict:
     filename = Path(file.filename).name if file.filename else "uploaded_file"
     file_content = await file.read()
 
     async with httpx.AsyncClient(timeout=300.0) as client:
+        form_data = {
+            "type": document_type,
+            "room_id": room_id or "",
+        }
         response = await client.post(
             DOCUMENT_PROCESS_URL,
             files={"file": (filename, file_content, file.content_type or "application/octet-stream")},
-            data={"room_id": room_id, "type": document_type},
+            data=form_data,
         )
 
     response.raise_for_status()
@@ -382,11 +374,13 @@ async def _process_document_file(file: UploadFile, room_id: str, document_type: 
     processed_result["content_markdown"] = content_markdown
     json_path = _save_processed_result_to_local_json(processed_result, document_id)
 
-    ensure_conversation(conversation_id=result_room_id, title=result_filename)
+    # room_id가 있을 때만 conversation 생성
+    if result_room_id:
+        ensure_conversation(conversation_id=result_room_id, title=result_filename)
 
     saved_document_id = save_document_metadata({
         "id": document_id,
-        "conversation_id": result_room_id,
+        "conversation_id": result_room_id or "",
         "title": result_filename,
         "type": result_type,
         "source": _get_source(result_filename),
@@ -397,9 +391,9 @@ async def _process_document_file(file: UploadFile, room_id: str, document_type: 
         "notion_url": "",
         "error": "",
     })
-
+    
     try:
-        chroma_load_result = load_document(document_id=saved_document_id, room_id=result_room_id)
+        chroma_load_result = load_document(document_id=saved_document_id, room_id=result_room_id or "")
         chroma_status = "success" if chroma_load_result.get("status") == "success" else "failed"
         update_chroma_status(saved_document_id, chroma_status)
         print(f"[document_service] ChromaDB 적재 결과: {chroma_load_result}")
@@ -408,6 +402,11 @@ async def _process_document_file(file: UploadFile, room_id: str, document_type: 
         chroma_load_result = {"status": "error", "chunk_count": 0, "document_id": saved_document_id, "error": repr(e)}
         update_chroma_status(saved_document_id, "failed")
         print(f"[document_service] ChromaDB 적재 실패: {repr(e)}")
+
+    # room_id가 있으면 room_document_links에 연결 추가 (ChromaDB 성공 여부와 무관)
+    if result_room_id:
+        link_document_to_room(result_room_id, saved_document_id)
+        print(f"[document_service] room_document_links 연결 완료: {result_room_id} → {saved_document_id}")
 
     return {
         "status": "success",
@@ -425,8 +424,7 @@ async def _process_document_file(file: UploadFile, room_id: str, document_type: 
     }
 
 
-# 문서 업로드 통합 처리 (파일 검증 → 8003 처리 → DB 저장 → ChromaDB 적재)
-async def upload_and_process_document(file: UploadFile, room_id: str, document_type: str = "document") -> dict:
+async def upload_and_process_document(file: UploadFile, room_id: str | None, document_type: str = "document") -> dict:
     filename = Path(file.filename).name if file and file.filename else "uploaded_file"
 
     try:
@@ -453,7 +451,6 @@ async def upload_and_process_document(file: UploadFile, room_id: str, document_t
 
 # 문서 상세 조회
 
-# 문서 상세 조회 응답 구성 (raw/analysis/organized 포함)
 def get_document_detail(document_id: str) -> dict:
     try:
         document = get_document_by_id(document_id)
@@ -531,7 +528,6 @@ def get_document_detail(document_id: str) -> dict:
 
 # 문서 삭제
 
-# 문서 삭제 (8003 원본 + 로컬 JSON + ChromaDB 벡터 + SQLite)
 def delete_processed_document(document_id: str) -> dict:
     try:
         document = get_document_by_id(document_id)
