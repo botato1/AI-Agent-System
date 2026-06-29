@@ -10,7 +10,7 @@ const menuSections = [
       { icon: Home, label: '홈', id: 'home' },
       { icon: Activity, label: '문서분석', id: 'pipeline' },
       { icon: Mic, label: '음성분석', id: 'voice' },
-      { icon: CheckSquare, label: '업무 (Task)', id: 'tasks' },
+      { icon: CheckSquare, label: '업무', id: 'tasks' },
     ]
   },
   {
@@ -29,6 +29,7 @@ interface Conversation {
   created_at: string
   updated_at: string
   filename: string | null
+  document_id: string | null // 지수가 새로 추가해준 필드 — 분석 결과 이동에 사용
 }
 
 interface SidebarProps {
@@ -39,7 +40,7 @@ interface SidebarProps {
   onChatSelect: (chatId: number) => void
   onCollapse: (v: boolean) => void
   refreshKey?: number
-  onRoomSelect: (room_id: string, filename: string | null) => void
+  onRoomSelect: (room_id: string, filename: string | null, documentId: string | null) => void
   uploadingFile?: string | null
 }
 
@@ -162,7 +163,7 @@ export default function Sidebar({ activePage, onPageChange, isDark, onToggleDark
                     className="group flex items-center rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition mb-0.5"
                   >
                     <button
-                      onClick={() => onRoomSelect(chat.room_id, chat.filename ?? null)}
+                      onClick={() => onRoomSelect(chat.room_id, chat.filename ?? null, chat.document_id ?? null)}
                       className="flex-1 text-left px-3 py-1.5 text-xs text-gray-500 dark:text-gray-400 truncate"
                     >
                       {chat.title}

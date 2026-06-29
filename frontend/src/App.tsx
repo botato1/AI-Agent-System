@@ -10,6 +10,7 @@ import Pipeline from './pages/Pipeline'
 import Graph from './pages/Graph'
 import Voice from './pages/Voice'
 import VoiceAnalysis from './pages/VoiceAnalysis'
+import type { PipelineStatus } from './pages/Pipeline'
 
 const BASE_URL = import.meta.env.VITE_API_URL
 
@@ -38,8 +39,8 @@ export default function App() {
 
   const [selectedChatId, setSelectedChatId] = useState<number | null>(null)
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null)
-  const [targetRoomId, setTargetRoomId] = useState<string | null>(null)
   const [targetFilename, setTargetFilename] = useState<string | null>(null)
+  const [targetDocumentId, setTargetDocumentId] = useState<string | null>(null)
 
   const [reviewFileName, setReviewFileName] = useState<string | null>(null)
   const [sidebarRefreshKey, setSidebarRefreshKey] = useState(0)
@@ -56,6 +57,14 @@ export default function App() {
   // 사이드바 배너용 업로드 중인 파일명 (null이면 배너 숨김)
   const [uploadingFile, setUploadingFile] = useState<string | null>(null)
 
+  // 문서분석(Pipeline) 진행 상태 — 다른 페이지 갔다 와도 안 사라지게 App.tsx로 끌어올림
+  const [pipelineFile, setPipelineFile] = useState<string | null>(null)
+  const [pipelineStatuses, setPipelineStatuses] = useState<PipelineStatus[]>(Array(6).fill('wait'))
+  const [pipelineCurrentStep, setPipelineCurrentStep] = useState(-1)
+  const [pipelineLogs, setPipelineLogs] = useState<string[]>([])
+  const [pipelineIsRunning, setPipelineIsRunning] = useState(false)
+  const [pipelineUploadError, setPipelineUploadError] = useState<string | null>(null)
+
   useEffect(() => {
     if (isDark) {
       document.documentElement.classList.add('dark')
@@ -69,6 +78,28 @@ export default function App() {
     setTimeout(() => setToast(null), 1500)
   }
 
+  // documentId로 문서 상세조회(GET /api/documents/{id})를 호출해서
+  // analysis/organized가 채워진 진짜 데이터로 documentAnalysisData를 갱신함
+  // - 업로드 직후(onFileUploaded)와 그래프/보관함에서 분석 보기 누를 때 둘 다 이 함수를 재사용
+  const fetchDocumentAnalysis = async (documentId: string, fallbackChromaStatus?: string) => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/documents/${documentId}`)
+      const data = await res.json()
+      if (data.status === 'success') {
+        setDocumentAnalysisData({
+          ...data.document,
+          // 상세조회 응답엔 chroma_status가 없을 수 있어서, 업로드 응답값을 fallback으로 유지
+          chroma_status: fallbackChromaStatus ?? data.document.chroma_status,
+        })
+      } else {
+        setDocumentAnalysisData({ document_id: documentId })
+      }
+    } catch (err) {
+      console.error('문서 상세조회 실패:', err)
+      setDocumentAnalysisData({ document_id: documentId })
+    }
+  }
+
   const renderPage = () => {
     switch (activePage) {
       case 'home': return (
@@ -79,52 +110,50 @@ export default function App() {
           activeRoomId={activeRoomId}
           setActiveRoomId={setActiveRoomId}
           targetFilename={targetFilename}
-          onGoToAnalysis={() => setActivePage('documentanalysis')}
-          onClearFilename={() => setTargetFilename(null)}
+          targetDocumentId={targetDocumentId}
+          onGoToAnalysis={(documentId) => {
+            setDocumentAnalysisData(null) // 이동 전에 이전 데이터부터 비움
+            if (documentId) {
+              fetchDocumentAnalysis(documentId)
+            }
+            setActivePage('documentanalysis')
+          }}
+          onClearFilename={() => {
+            setTargetFilename(null)
+            setTargetDocumentId(null)
+          }}
         />
       )
       case 'pipeline': return (
-  <Pipeline
-    onGoToAnalysis={() => setActivePage('documentanalysis')}
-    reviewFileName={reviewFileName}
-    onClearReview={() => setReviewFileName(null)}
-    onRoomCreated={() => setSidebarRefreshKey(prev => prev + 1)}
-    onFileUploaded={async (filename, uploadData) => {
-      console.log('파일명 세팅:', filename)
-      setTargetFilename(filename)
-
-      // 업로드 응답엔 analysis/organized가 없어서, 상세조회 API로 한 번 더 받아옴
-      // (보관함 DocumentAnalysis.tsx가 쓰는 것과 같은 API라 필드 모양이 동일해짐)
-      try {
-        const res = await fetch(`${BASE_URL}/api/documents/${uploadData.document_id}`)
-        const data = await res.json()
-        if (data.status === 'success') {
-          setDocumentAnalysisData({
-            ...data.document,
-            chroma_status: uploadData.chroma_status, // 상세조회엔 없는 필드라 업로드 응답 값 유지
-          })
-        } else {
-          // 상세조회 실패해도 업로드 자체는 됐으니 최소 정보로 표시
-          setDocumentAnalysisData({
-            filename: uploadData.filename,
-            document_id: uploadData.document_id,
-            chroma_status: uploadData.chroma_status,
-          })
-        }
-      } catch (err) {
-        console.error('문서 상세조회 실패:', err)
-        setDocumentAnalysisData({
-          filename: uploadData.filename,
-          document_id: uploadData.document_id,
-          chroma_status: uploadData.chroma_status,
-        })
-      }
-    }}
-    onRoomIdCreated={(roomId) => setTargetRoomId(roomId)}
-    onUploadStart={(filename) => setUploadingFile(filename)}
-    onUploadEnd={() => setUploadingFile(null)}
-  />
-)
+        <Pipeline
+          onGoToAnalysis={() => setActivePage('documentanalysis')}
+          reviewFileName={reviewFileName}
+          onClearReview={() => setReviewFileName(null)}
+          onFileUploaded={(filename, uploadData) => {
+            console.log('파일명 세팅:', filename)
+            setTargetFilename(filename)
+            setTargetDocumentId(uploadData?.document_id ?? null)
+            setDocumentAnalysisData(null)
+            if (uploadData?.document_id) {
+              fetchDocumentAnalysis(uploadData.document_id, uploadData.chroma_status)
+            }
+          }}
+          onUploadStart={(filename) => setUploadingFile(filename)}
+          onUploadEnd={() => setUploadingFile(null)}
+          file={pipelineFile}
+          setFile={setPipelineFile}
+          statuses={pipelineStatuses}
+          setStatuses={setPipelineStatuses}
+          currentStep={pipelineCurrentStep}
+          setCurrentStep={setPipelineCurrentStep}
+          logs={pipelineLogs}
+          setLogs={setPipelineLogs}
+          isRunning={pipelineIsRunning}
+          setIsRunning={setPipelineIsRunning}
+          uploadError={pipelineUploadError}
+          setUploadError={setPipelineUploadError}
+        />
+      )
       case 'documents': return (
         <Documents
           selectedDocId={selectedDocId}
@@ -149,8 +178,10 @@ export default function App() {
             setTimeout(() => setActivePage('pipeline'), 0)
           }}
           onGoToChat={() => {
-            setActiveRoomId(targetRoomId)
-            setTargetFilename(targetFilename)
+            // 이제 채팅방을 미리 만들어두지 않으므로, 새 채팅 상태로 보냄.
+            // ChatArea가 targetDocumentId를 보고 이 문서를 칩으로 미리 보여주고,
+            // 첫 메시지를 보내는 시점에 새로 생성되는 room에 연결됨
+            setActiveRoomId(null)
             setActivePage('home')
           }}
           onBack={() => setActivePage('pipeline')}
@@ -159,14 +190,14 @@ export default function App() {
       case 'tasks': return <Tasks />
       case 'settings': return <Settings />
       case 'graph': return (
-  <Graph
-    onGoToAnalysis={(documentId) => {
-      setSelectedDocId(documentId)
-      setDocViewMode('analysis')
-      setActivePage('documents')
-    }}
-  />
-)
+        <Graph
+          onGoToAnalysis={(documentId) => {
+            setSelectedDocId(documentId)
+            setDocViewMode('analysis')
+            setActivePage('documents')
+          }}
+        />
+      )
       case 'voice': return voicePage === 'result'
         ? <VoiceAnalysis
             fileId={selectedVoiceId!}
@@ -199,9 +230,10 @@ export default function App() {
             setActivePage('home')
           }}
           onCollapse={(v) => setSidebarCollapsed(v)}
-          onRoomSelect={(room_id, filename) => {
+          onRoomSelect={(room_id, filename, documentId) => {
             setActiveRoomId(room_id)
             setTargetFilename(filename ?? null)
+            setTargetDocumentId(documentId ?? null)
             setActivePage('home')
           }}
           uploadingFile={uploadingFile}

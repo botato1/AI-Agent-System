@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
-import { Send } from 'lucide-react'
+import { Send, Plus, X, FileText, Mic } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
+import { useToast } from '../../App'
 
 const BASE_URL = import.meta.env.VITE_API_URL
 
@@ -27,16 +28,27 @@ interface Message {
   tasks?: ChatTask[]
 }
 
+// 채팅에 연결된 문서/음성 한 건 (입력창 + 버튼으로 선택한 것들)
+interface LinkedDoc {
+  document_id: string
+  filename: string
+  type?: string // 'document' | 'voice'
+}
+
 interface Props {
   activeRoomId: string | null
   setActiveRoomId: (id: string) => void
   onRoomCreated: () => void
   targetFilename?: string | null
-  onGoToAnalysis?: () => void
+  targetDocumentId?: string | null
+  onGoToAnalysis?: (documentId: string | null) => void
 }
 
 const TASKS_KEY = 'chatTasks'
-const ADDED_KEY = 'addedTaskIds'
+const ADDED_KEY = 'addedTaskIds' // 구조: { [roomId]: string[] }
+
+// 그래프/보관함과 동일한 패턴 — 공백·한글 인코딩 차이까지 같은 이름으로 인식해서 중복 제거
+const normalizeFilename = (filename: string) => filename.trim().normalize('NFC')
 
 // 새로고침해도 유지되도록 채팅방별 업무 목록을 localStorage에 저장 (task_id 기준 중복 제거)
 const saveRoomTasks = (roomId: string, tasks: ChatTask[]) => {
@@ -59,32 +71,128 @@ const loadRoomTasks = (roomId: string): ChatTask[] => {
   } catch { return [] }
 }
 
-const saveAddedIds = (ids: Set<string>) => {
+// "추가됨" 상태도 채팅방별로 분리해서 저장 — 다른 방에서 같은 task_id가 또 나와도 서로 안 섞이게
+const saveAddedIds = (roomId: string, ids: Set<string>) => {
   try {
-    localStorage.setItem(ADDED_KEY, JSON.stringify([...ids]))
+    const all = JSON.parse(localStorage.getItem(ADDED_KEY) ?? '{}')
+    all[roomId] = [...ids]
+    localStorage.setItem(ADDED_KEY, JSON.stringify(all))
   } catch {}
 }
 
-const loadAddedIds = (): Set<string> => {
+const loadAddedIds = (roomId: string | null): Set<string> => {
+  if (!roomId) return new Set()
   try {
-    const saved = localStorage.getItem(ADDED_KEY)
-    return saved ? new Set(JSON.parse(saved)) : new Set()
+    const all = JSON.parse(localStorage.getItem(ADDED_KEY) ?? '{}')
+    return new Set(all[roomId] ?? [])
   } catch { return new Set() }
 }
 
-export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated, targetFilename, onGoToAnalysis }: Props) {
+export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated, targetFilename, targetDocumentId, onGoToAnalysis }: Props) {
+  const { showToast } = useToast()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [addedTaskIds, setAddedTaskIds] = useState<Set<string>>(loadAddedIds)
+  const [addedTaskIds, setAddedTaskIds] = useState<Set<string>>(new Set())
   const bottomRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   // loading state는 비동기라 useEffect 안에서 즉시 참조가 안 되므로 ref로 동기 추적
   const loadingRef = useRef(false)
 
+  // 이 채팅방에 연결된 문서/음성 목록 (+ 버튼으로 선택한 것들) — 서버 기준
+  const [linkedDocs, setLinkedDocs] = useState<LinkedDoc[]>([])
+  const [showPicker, setShowPicker] = useState(false)
+  const [allDocs, setAllDocs] = useState<LinkedDoc[]>([])
+  const [pickerLoading, setPickerLoading] = useState(false)
+  const [pendingSelected, setPendingSelected] = useState<Set<string>>(new Set())
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // 채팅방이 바뀔 때마다 그 방의 "추가됨" 상태를 새로 불러옴 (다른 방 상태가 섞여 보이지 않도록)
+  useEffect(() => {
+    setAddedTaskIds(loadAddedIds(activeRoomId))
+  }, [activeRoomId])
+
+  // 서버에서 이 채팅방에 연결된 문서 목록을 가져옴
+  const fetchRoomDocuments = async (roomId: string): Promise<LinkedDoc[]> => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/rooms/${roomId}/documents`)
+      const data = await res.json()
+      if (data.status === 'success') {
+        return (data.documents ?? []).map((d: any) => ({
+          document_id: d.document_id,
+          filename: d.title,
+          type: d.type,
+        }))
+      }
+      return []
+    } catch (err) {
+      console.error('연결된 문서 목록 조회 실패:', err)
+      return []
+    }
+  }
+
+  // 문서를 채팅방에 연결 (서버 반영)
+  const linkDocumentToRoom = async (roomId: string, documentId: string) => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/rooms/${roomId}/documents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ document_id: documentId }),
+      })
+      const data = await res.json()
+      if (data.status !== 'success') {
+        console.error('문서 연결 실패:', data.error ?? data.message)
+        showToast('문서 연결에 실패했어요', 'error')
+      }
+    } catch (err) {
+      console.error('문서 연결 요청 실패:', err)
+      showToast('문서 연결에 실패했어요', 'error')
+    }
+  }
+
+  // 문서를 채팅방에서 연결 해제 (서버 반영, 문서 자체는 삭제 안 됨)
+  const unlinkDocumentFromRoom = async (roomId: string, documentId: string) => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/rooms/${roomId}/documents/${documentId}`, {
+        method: 'DELETE',
+      })
+      const data = await res.json()
+      if (data.status !== 'success') {
+        console.error('문서 연결 해제 실패:', data.error ?? data.message)
+        showToast('문서 연결 해제에 실패했어요', 'error')
+      }
+    } catch (err) {
+      console.error('문서 연결 해제 요청 실패:', err)
+      showToast('문서 연결 해제에 실패했어요', 'error')
+    }
+  }
+
+  // 채팅방이 바뀔 때마다 연결된 문서 목록을 서버에서 새로 불러옴.
+  // 아직 채팅방이 없는 새 채팅인데 업로드 직후 받은 targetFilename/targetDocumentId가 있으면
+  // (Pipeline에서 막 업로드해서 들어온 경우) 그 문서 1개를 미리 칩으로 보여줌
+  useEffect(() => {
+    if (!activeRoomId) {
+      if (targetDocumentId && targetFilename) {
+        setLinkedDocs([{ document_id: targetDocumentId, filename: targetFilename, type: 'document' }])
+      } else {
+        setLinkedDocs([])
+      }
+      return
+    }
+
+    fetchRoomDocuments(activeRoomId).then(async (docs) => {
+      // 업로드 직후 처음 들어온 방인데, 서버엔 아직 연결이 안 돼있으면 지금 연결해줌
+      if (docs.length === 0 && targetDocumentId && targetFilename) {
+        await linkDocumentToRoom(activeRoomId, targetDocumentId)
+        setLinkedDocs([{ document_id: targetDocumentId, filename: targetFilename, type: 'document' }])
+      } else {
+        setLinkedDocs(docs)
+      }
+    })
+  }, [activeRoomId, targetDocumentId, targetFilename])
 
   useEffect(() => {
     if (!activeRoomId) {
@@ -149,14 +257,85 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
       if (!data.error) {
         setAddedTaskIds(prev => {
           const next = new Set(prev).add(task.task_id)
-          saveAddedIds(next)
+          if (activeRoomId) saveAddedIds(activeRoomId, next)
           return next
         })
       }
     } catch {}
   }
 
+  // + 버튼 클릭 — 보관함 문서/음성 목록을 불러와서 선택 팝오버를 염
+  const openPicker = () => {
+    setPendingSelected(new Set(linkedDocs.map(d => d.document_id)))
+    setShowPicker(true)
+    if (allDocs.length === 0) {
+      setPickerLoading(true)
+      Promise.all([
+        fetch(`${BASE_URL}/api/documents`).then(r => r.json()).catch(() => ({ documents: [] })),
+        fetch(`${BASE_URL}/api/stt/list`).then(r => r.json()).catch(() => ({ data: [] })),
+      ])
+        .then(([docRes, voiceRes]) => {
+          const docs: LinkedDoc[] = (docRes.documents ?? [])
+            .filter((d: any) => d.type !== 'voice')
+            .map((d: any) => ({ document_id: d.document_id, filename: d.filename, type: 'document' }))
+          const voices: LinkedDoc[] = (voiceRes.data ?? []).map((v: any) => ({
+            document_id: v.document_id,
+            filename: v.filename,
+            type: 'voice',
+          }))
+          const combined = [...docs, ...voices]
+          // 같은 이름(공백/인코딩 차이 포함) 문서·음성은 첫 번째 것만 남김
+          const unique = combined.filter((d, i, self) =>
+            i === self.findIndex(x => normalizeFilename(x.filename) === normalizeFilename(d.filename))
+          )
+          setAllDocs(unique)
+        })
+        .catch(err => console.error('문서 목록 불러오기 실패:', err))
+        .finally(() => setPickerLoading(false))
+    }
+  }
+
+  const togglePending = (id: string) => {
+    setPendingSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  // 선택 완료 — 이전 선택과 비교해서 새로 추가된 건 연결 API, 빠진 건 해제 API 호출
+  const confirmSelection = async () => {
+    const selected = allDocs.filter(d => pendingSelected.has(d.document_id))
+    const prevIds = new Set(linkedDocs.map(d => d.document_id))
+    const newIds = new Set(selected.map(d => d.document_id))
+
+    const added = selected.filter(d => !prevIds.has(d.document_id))
+    const removed = linkedDocs.filter(d => !newIds.has(d.document_id))
+
+    setLinkedDocs(selected)
+    if (activeRoomId) {
+      // 채팅방이 이미 있으면 즉시 서버에 반영
+      await Promise.all([
+        ...added.map(d => linkDocumentToRoom(activeRoomId, d.document_id)),
+        ...removed.map(d => unlinkDocumentFromRoom(activeRoomId, d.document_id)),
+      ])
+    }
+    // 채팅방이 아직 없는 새 채팅이면, room이 생성되는 시점(handleSend)에 한꺼번에 연결됨
+    setShowPicker(false)
+  }
+
+  // 칩의 x 버튼 — 연결 해제
+  const removeLinkedDoc = async (documentId: string) => {
+    const next = linkedDocs.filter(d => d.document_id !== documentId)
+    setLinkedDocs(next)
+    if (activeRoomId) {
+      await unlinkDocumentFromRoom(activeRoomId, documentId)
+    }
+  }
+
   const handleSend = async (overrideText?: string) => {
+    console.log('handleSend 시작 시점 linkedDocs:', linkedDocs)
     const userText = (overrideText ?? input).trim()
     if (!userText || loading) return
 
@@ -170,6 +349,10 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
         roomId = await createRoom(userText)
         setActiveRoomId(roomId)
         onRoomCreated()
+        // 방 생성 전에 + 버튼으로 미리 골라둔 문서가 있으면, 새로 생긴 room에 정식으로 연결
+        if (linkedDocs.length > 0) {
+          await Promise.all(linkedDocs.map(d => linkDocumentToRoom(roomId!, d.document_id)))
+        }
       } catch {
         setLoading(false)
         loadingRef.current = false
@@ -193,7 +376,9 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
         body: JSON.stringify({
           room_id: roomId,
           content: userText,
-          source: targetFilename ? 'pdf' : 'text',
+          source: linkedDocs.length > 0 ? 'pdf' : 'text',
+          // target_document_id/target_document_ids는 안 보냄 —
+          // 백엔드가 room_id 기준으로 연결된 문서를 자동으로 찾아서 RAG 필터를 구성함
         }),
         signal: abortControllerRef.current.signal,
       })
@@ -235,17 +420,31 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
   return (
     <div className="flex-1 flex flex-col">
 
-      {targetFilename && (
-        <div className="mb-3">
-          <button
-            onClick={() => onGoToAnalysis?.()}
-            className="flex items-center gap-2 text-xs text-blue-500 border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/30 px-4 py-2 rounded-xl hover:bg-blue-100 dark:hover:bg-blue-900/50 transition"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-            📄 {targetFilename} 분석 결과 보기 →
-          </button>
+      {/* 연결된 문서/음성 칩 — 선택된 게 있을 때만 보임 */}
+      {linkedDocs.length > 0 && (
+        <div className="mb-3 flex items-center gap-2 flex-wrap">
+          {linkedDocs.map((doc) => (
+            <div
+              key={doc.document_id}
+              className="group flex items-center gap-1.5 text-xs text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/30 pl-2.5 pr-1.5 py-1.5 rounded-full"
+            >
+              {doc.type === 'voice' ? <Mic size={12} /> : <FileText size={12} />}
+              <button
+                onClick={() => doc.type !== 'voice' && onGoToAnalysis?.(doc.document_id)}
+                className={`truncate max-w-[160px] ${doc.type !== 'voice' ? 'hover:underline' : ''}`}
+                title={doc.filename}
+              >
+                {doc.filename}
+              </button>
+              <button
+                onClick={() => removeLinkedDoc(doc.document_id)}
+                className="opacity-0 group-hover:opacity-100 transition flex-shrink-0 text-blue-400 hover:text-red-400"
+                aria-label="연결 해제"
+              >
+                <X size={11} />
+              </button>
+            </div>
+          ))}
         </div>
       )}
 
@@ -377,7 +576,81 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
         </div>
       )}
 
-      <div className="flex gap-2 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-2xl p-2 shadow-sm">
+      <div className="flex gap-2 items-end bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-2xl p-2 shadow-sm relative">
+        <div className="relative flex-shrink-0">
+          <button
+            onClick={openPicker}
+            className="w-8 h-8 rounded-xl flex items-center justify-center bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition"
+            aria-label="문서 선택"
+          >
+            <Plus size={16} className="text-blue-500" />
+          </button>
+
+          {showPicker && (
+            <>
+              {/* 바깥 클릭하면 닫히게 하는 투명 배경 */}
+              <div className="fixed inset-0 z-40" onClick={() => setShowPicker(false)} />
+              <div
+                className="absolute bottom-full left-0 mb-2 w-72 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-50 overflow-hidden"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="px-3.5 py-2.5 border-b border-gray-100 dark:border-gray-700">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-medium text-gray-700 dark:text-gray-200">문서 선택</span>
+                    <button onClick={() => setShowPicker(false)} className="text-gray-400 hover:text-gray-600">
+                      <X size={14} />
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-gray-400 leading-tight">선택한 문서 안에서만 답변해요.</p>
+                </div>
+
+                <div className="p-1.5 flex flex-col max-h-64 overflow-y-auto [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-thumb]:bg-gray-600 [&::-webkit-scrollbar-track]:bg-transparent">
+                  {pickerLoading ? (
+                    <p className="text-xs text-gray-400 text-center py-4">불러오는 중...</p>
+                  ) : allDocs.length === 0 ? (
+                    <p className="text-xs text-gray-400 text-center py-4">업로드된 문서가 없어요</p>
+                  ) : (
+                    allDocs.map((doc) => {
+                      const checked = pendingSelected.has(doc.document_id)
+                      return (
+                        <label
+                          key={doc.document_id}
+                          className={`flex items-center gap-2.5 px-2 py-2 rounded-lg cursor-pointer transition flex-shrink-0 ${
+                            checked ? 'bg-blue-50 dark:bg-blue-900/30' : 'hover:bg-gray-50 dark:hover:bg-gray-700'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => togglePending(doc.document_id)}
+                            className="flex-shrink-0"
+                          />
+                          {doc.type === 'voice' ? (
+                            <Mic size={15} className="text-blue-400 flex-shrink-0" />
+                          ) : (
+                            <FileText size={15} className="text-gray-400 flex-shrink-0" />
+                          )}
+                          <span className="text-xs text-gray-700 dark:text-gray-200 truncate">{doc.filename}</span>
+                        </label>
+                      )
+                    })
+                  )}
+                </div>
+
+                <div className="px-3.5 py-2.5 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between">
+                  <span className="text-xs text-gray-400">{pendingSelected.size}개 선택됨</span>
+                  <button
+                    onClick={confirmSelection}
+                    className="text-xs text-white bg-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-700"
+                  >
+                    선택 완료
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -388,12 +661,12 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
             }
           }}
           placeholder="메시지를 입력하세요... (Enter로 전송)"
-          className="flex-1 text-sm text-gray-700 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500 bg-transparent resize-none outline-none px-2 py-1 max-h-32"
+          className="flex-1 text-sm text-gray-700 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500 bg-transparent resize-none outline-none px-2 py-1.5 max-h-32"
           rows={1}
         />
         <button
           onClick={loading ? () => abortControllerRef.current?.abort() : () => handleSend()}
-          className={`w-8 h-8 rounded-xl flex items-center justify-center transition flex-shrink-0 self-end ${
+          className={`w-8 h-8 rounded-xl flex items-center justify-center transition flex-shrink-0 ${
             loading ? 'bg-red-500 hover:bg-red-600' : input.trim() ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-100 dark:bg-gray-700'
           }`}
         >
