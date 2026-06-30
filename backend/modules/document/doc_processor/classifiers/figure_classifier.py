@@ -143,14 +143,8 @@ def _classify_by_stats(
         return "table_image"
 
     # ── Chart ─────────────────────────────────────────────────────────────────
-    # 밝은 배경 + 중간 엣지 + 가로 비율 우세 (color_std 상한 완화: 원형 차트 포함)
-    if mg > 155 and ed > 0.04 and aspect > 1.15 and cs < 70.0:
-        return "chart"
-    # 원형 차트: 가로 비율이 정방형에 가깝고 엣지 존재
-    if mg > 150 and ed > 0.04 and 0.7 <= aspect <= 1.4 and cs < 70.0:
-        return "chart"
-    # 색상 풍부한 차트 (파이차트 등): cs 제한 없이 밝고 넓은 이미지
-    if mg > 180 and ed > 0.01 and aspect > 1.5 and dk > 0.05:
+    # 밝은 배경 + 중간 엣지 + 가로 비율 우세
+    if mg > 155 and ed > 0.04 and aspect > 1.15 and cs < 55.0:
         return "chart"
 
     # ── Diagram ──────────────────────────────────────────────────────────────
@@ -164,8 +158,7 @@ def _classify_by_stats(
         return "product"
 
     # ── Photo ─────────────────────────────────────────────────────────────────
-    # 엣지가 있으면 차트/다이어그램일 수 있으므로 photo 판정 보류
-    if cs > 30.0 and ed < 0.02:
+    if cs > 30.0:
         return "photo"
 
     return "unknown"
@@ -220,7 +213,7 @@ def classify(
     figure_type = _classify_by_stats(stats, area_ratio, aspect, top_ratio)
 
     # text_image / unknown으로 분류됐더라도 격자선이 명확히 감지되면 table_image로 재분류
-    if figure_type in ("text_image", "unknown", "chart") and _has_table_grid(image):
+    if figure_type in ("text_image", "unknown") and _has_table_grid(image):
         figure_type = "table_image"
 
     return figure_type, stats

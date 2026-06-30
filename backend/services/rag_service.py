@@ -10,10 +10,9 @@ if str(BASE_DIR) not in sys.path:
 from backend.modules.rag.chroma_client import (
     search_hybrid,
     MEETING_COLLECTION,
+    DOCUMENT_COLLECTION,
     KNOWLEDGE_COLLECTION,
 )
-
-DOCUMENT_COLLECTION = KNOWLEDGE_COLLECTION
 
 
 def get_utc_now() -> str:

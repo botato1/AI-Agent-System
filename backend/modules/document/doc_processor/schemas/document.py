@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from doc_processor.schemas.chunk import ChunkSchema
 from doc_processor.schemas.metadata import DocumentMetadata, PageResultSchema
 
 # 팀 공통 status 값
@@ -34,8 +35,6 @@ class DocumentSchema(BaseModel):
     user_edited: bool = False
 
     # ── 문서 처리 전용 키 ────────────────────────────────
-    tables: list[dict] = Field(default_factory=list)   # VL 추출 표 [{page, markdown}]
-    charts: list[dict] = Field(default_factory=list)   # VL 추출 차트 [{page, raw_text, data}]
-    chunks: list[dict] = Field(default_factory=list)   # 전체 텍스트 청크 (caption 제외, title/body만)
+    chunks: list[ChunkSchema] = Field(default_factory=list)
     page_results: list[PageResultSchema] = Field(default_factory=list)
     metadata: DocumentMetadata

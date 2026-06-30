@@ -10,17 +10,16 @@ import pdfplumber
 
 from doc_processor.classifiers import figure_classifier
 from doc_processor.core.models import (
-    ChartBlock,
     DocumentResult,
     ImageBlock,
     OcrStats,
     PageContent,
     PageResult,
-    TableBlock,
 )
 from doc_processor.core.pdf_classifier import classify_pdf
 from doc_processor.postprocess.processor import PostProcessor
 from doc_processor.ocr.paddle_engine import PaddleEngine
+from doc_processor.ocr.surya_engine import SuryaEngine
 from doc_processor.ocr import voter
 from doc_processor.ocr.worthy_score import calculate_ocr_worthy_score, OCR_THRESHOLD, AMBIGUOUS_TYPES
 from doc_processor.ocr.quality_scorer import calculate_quality_score, is_useful
@@ -35,8 +34,6 @@ from doc_processor.parsers.image_parser import (
     render_page,
 )
 from doc_processor.ocr.table_ocr import get_or_create_tsr, run_table_ocr
-from doc_processor.ocr.vl_engine import VLEngine
-from doc_processor.postprocess.vl_parser import parse as vl_parse
 from doc_processor.parsers.table_parser import extract_tables
 from doc_processor.parsers.text_parser import extract_text_blocks
 from doc_processor.ocr.image_preprocessor import preprocess_for_ocr
@@ -58,8 +55,8 @@ class DocumentPipeline:
         self.debug_ocr = debug_ocr
         self.ocr_upscale = ocr_upscale          # True 이면 ImageBlock.debug 채움
         self._paddle: PaddleEngine | None = None
+        self._surya: SuryaEngine | None = None
         self._tsr = None                    # TableStructureRecognition (table_image 최초 사용 시 로드)
-        self._vl: VLEngine | None = None    # PaddleOCR-VL (표/차트 전용)
         self._worst_ocr: list[dict] = []    # quality_score 하위 20건 (debug_ocr=True 시 사용)
         self._postprocessor = PostProcessor()
         # Docling 레이아웃 파서 (선택적)
@@ -113,6 +110,9 @@ class DocumentPipeline:
         if self._paddle is None:
             print("[Pipeline] Loading PaddleOCR...")
             self._paddle = PaddleEngine()
+        if self._surya is None:
+            print("[Pipeline] Loading Surya OCR...")
+            self._surya = SuryaEngine()
 
     def run(self, pdf_path: str) -> DocumentResult:
         path = Path(pdf_path)
@@ -321,7 +321,16 @@ class DocumentPipeline:
                 continue
 
             self._ocr_stats.success_count += 1
-            self._append_ocr_result(content, ocr_result, list(nb), page_no)
+            content.images.append(ImageBlock(
+                bbox=list(nb),
+                ocr_text=ocr_result["text"],
+                voting_confidence=ocr_result["confidence"],
+                source_engines=ocr_result["sources"],
+                paddle_lines=ocr_result["paddle_lines"],
+                surya_lines=ocr_result.get("surya_lines", []),
+                quality_score=ocr_result["quality_score"],
+                debug=ocr_result.get("debug"),
+            ))
 
     # ── OCR 경로 B: PyMuPDF 이미지 블록 기반 (Docling 없을 때 폴백) ──────────
 
@@ -385,7 +394,16 @@ class DocumentPipeline:
                     continue
 
                 self._ocr_stats.success_count += 1
-                self._append_ocr_result(content, ocr_result, list(nb), page_no)
+                content.images.append(ImageBlock(
+                    bbox=list(nb),
+                    ocr_text=ocr_result["text"],
+                    voting_confidence=ocr_result["confidence"],
+                    source_engines=ocr_result["sources"],
+                    paddle_lines=ocr_result["paddle_lines"],
+                    surya_lines=ocr_result.get("surya_lines", []),
+                    quality_score=ocr_result["quality_score"],
+                    debug=ocr_result.get("debug"),
+                ))
 
         elif not content.text and not content.tables:
             print("  → 텍스트/표 없음, 페이지 전체 OCR")
@@ -403,46 +421,16 @@ class DocumentPipeline:
             return
         self._ocr_stats.success_count += 1   # full_page 성공 집계
         w, h = page_image.size
-        self._append_ocr_result(content, ocr_result, [0.0, 0.0, float(w), float(h)], page_no)
-
-    def _append_ocr_result(
-        self,
-        content: PageContent,
-        ocr_result: dict,
-        bbox: list[float],
-        page_no: int,
-    ) -> None:
-        """OCR 결과를 fig_type에 따라 content.images / tables / charts에 추가합니다."""
-        vl_fig_type = ocr_result.get("vl_fig_type")
-
-        if vl_fig_type in ("table_image", "chart"):
-            parsed = vl_parse(ocr_result["text"], vl_fig_type, page_no)
-            if vl_fig_type == "table_image":
-                content.tables.append(TableBlock(
-                    data=[],
-                    markdown=parsed["markdown"],
-                    bbox=bbox,
-                ))
-            else:
-                content.charts.append(ChartBlock(
-                    bbox=bbox,
-                    description=parsed["raw_text"],
-                    extracted_data={
-                        "title": parsed.get("title", ""),
-                        "data":  parsed.get("data", []),
-                        "raw_text": parsed["raw_text"],
-                    },
-                ))
-        else:
-            content.images.append(ImageBlock(
-                bbox=bbox,
-                ocr_text=ocr_result["text"],
-                voting_confidence=ocr_result["confidence"],
-                source_engines=ocr_result["sources"],
-                paddle_lines=ocr_result["paddle_lines"],
-                quality_score=ocr_result["quality_score"],
-                debug=ocr_result.get("debug"),
-            ))
+        content.images.append(ImageBlock(
+            bbox=[0.0, 0.0, float(w), float(h)],
+            ocr_text=ocr_result["text"],
+            voting_confidence=ocr_result["confidence"],
+            source_engines=ocr_result["sources"],
+            paddle_lines=ocr_result["paddle_lines"],
+            surya_lines=ocr_result.get("surya_lines", []),
+            quality_score=ocr_result["quality_score"],
+            debug=ocr_result.get("debug"),
+        ))
 
     # ── OCR 실행 공통 로직 ────────────────────────────────────────────────────
 
@@ -459,19 +447,79 @@ class DocumentPipeline:
         품질 필터에 걸리거나 텍스트가 없으면 None 반환.
         결과 dict에 quality_score와 (debug_ocr=True 시) debug 정보가 포함됩니다.
         """
+        # ── table_image 전용 경로: TSR + Hybrid Cell OCR ─────────────────────
+        if fig_type == "table_image":
+            print(f"    [OCR{tag}] Table TSR path (fig_type=table_image)")
+            if self._tsr is None:
+                self._tsr = get_or_create_tsr()
+            tsr_result = run_table_ocr(image, self._paddle, tsr=self._tsr)
+            markdown = tsr_result["text"]
+            if not markdown.strip():
+                print(f"    [OCR{tag}] TSR 결과 없음 (빈 표)")
+                self._ocr_stats.empty_count += 1
+                return None
+            self._ocr_stats.table_tsr_count += 1
+            # success_count는 호출부(_ocr_from_layout line 339)에서 집계 → 여기선 생략
+            # useful_count는 _run_ocr() 내부에서만 처리하므로 여기서 직접 집계
+            self._ocr_stats.useful_count += 1
+            self._ocr_stats.accumulate_quality_score(tsr_result["structure_score"])
+            result: dict = {
+                "text":          markdown,
+                "confidence":    tsr_result["structure_score"],   # voting_confidence 용도
+                "quality_score": tsr_result["structure_score"],
+                "sources":       tsr_result["sources"],
+                "paddle_lines":  [],
+                "surya_lines":   [],
+            }
+            if self.debug_ocr:
+                result["debug"] = {
+                    "voting_path":       "tsr_paddle",
+                    "fig_type":          fig_type,
+                    "image_width":       image.width,
+                    "image_height":      image.height,
+                    "image_area":        image.width * image.height,
+                    "area_ratio":        round(area_ratio, 4),
+                    "tsr_structure_score": tsr_result["structure_score"],
+                    "tsr_cell_count":    tsr_result["cell_count"],
+                    "tsr_markdown":      markdown,
+                    # HTML 원본은 GT 검수 활성화 시만 포함
+                    # "tsr_html":        tsr_result["html"],
+                }
+            return result
+
+        # ── 전처리 + 업스케일 (table_image 제외 경로에만 적용) ──────────────────
         image = preprocess_for_ocr(image, upscale=self.ocr_upscale)
 
         paddle_lines = self._paddle.run(image)  # type: ignore[union-attr]
         paddle_quality = self._ocr_quality(paddle_lines)
 
-        print(f"    [OCR{tag}] Paddle only (quality={paddle_quality:.2f})")
-        result = voter.vote(paddle_lines, threshold=0.0)
-        result["sources"] = ["paddle_only"]
-        result["paddle_lines"] = paddle_lines
-        self._ocr_stats.paddle_only_count += 1
-        if fig_type in ("diagram", "chart"):
+        _SURYA_SKIP_TYPES = {"chart", "diagram"}
+
+        if fig_type in _SURYA_SKIP_TYPES:
+            print(f"    [OCR{tag}] Paddle only (fig_type={fig_type})")
+            result = voter.vote(paddle_lines, [], threshold=0.0)
+            result["sources"] = ["paddle_only"]
+            result["paddle_lines"] = paddle_lines
+            result["surya_lines"] = []
+            self._ocr_stats.paddle_only_count += 1
             self._ocr_stats.chart_paddle_only_count += 1
-        voting_path = "paddle_only"
+            voting_path = "paddle_only_chart"
+        elif paddle_quality >= self.paddle_only_threshold:
+            print(f"    [OCR{tag}] Paddle only (quality={paddle_quality:.2f})")
+            result = voter.vote(paddle_lines, [], threshold=0.0)
+            result["sources"] = ["paddle_only"]
+            result["paddle_lines"] = paddle_lines
+            result["surya_lines"] = []
+            self._ocr_stats.paddle_only_count += 1
+            voting_path = "paddle_only"
+        else:
+            print(f"    [OCR{tag}] Paddle+Surya voting (quality={paddle_quality:.2f})")
+            surya_lines = self._surya.run(image)  # type: ignore[union-attr]
+            result = voter.vote(paddle_lines, surya_lines)
+            result["paddle_lines"] = paddle_lines
+            result["surya_lines"] = surya_lines
+            self._ocr_stats.paddle_surya_count += 1
+            voting_path = "paddle+surya"
 
         if not result["text"].strip():
             print(f"    [OCR{tag}] 텍스트 없음 (빈 이미지)")
@@ -499,45 +547,56 @@ class DocumentPipeline:
 
         # ── 엔진별 문자/라인 수 계산 ─────────────────────────────────────────
         paddle_lines = result["paddle_lines"]
+        surya_lines  = result.get("surya_lines", [])
 
         paddle_char_count = sum(len(l) for l in paddle_lines)
+        surya_char_count  = sum(len(l) for l in surya_lines)
         voted_char_count  = len(voted_text.replace("\n", ""))
 
         paddle_line_count = len(paddle_lines)
+        surya_line_count  = len(surya_lines)
         voted_line_count  = len([l for l in voted_text.split("\n") if l.strip()])
 
+        # 엔진별 문자 수 통계 누적 (항상)
         self._ocr_stats.accumulate_char_counts(
             paddle_chars=paddle_char_count,
+            surya_chars=surya_char_count,
             voted_chars=voted_char_count,
         )
 
         # ── debug 정보 수집 (debug_ocr=True 일 때만) ─────────────────────────
         if self.debug_ocr:
             result["debug"] = {
-                "paddle_raw":        paddle_lines,
-                "voted_text":        voted_text,
-                "paddle_quality":    round(paddle_quality, 3),
-                "voting_path":       voting_path,
-                "filter_reason":     result.get("filter_reason"),
-                "quality_score":     q_score,
-                "fig_type":          fig_type,
-                "area_ratio":        round(area_ratio, 4),
-                "image_width":       image.width,
-                "image_height":      image.height,
-                "image_area":        image.width * image.height,
+                "paddle_raw":       paddle_lines,
+                "surya_raw":        surya_lines,
+                "voted_text":       voted_text,        # PostProcess 전 텍스트
+                "paddle_quality":   round(paddle_quality, 3),
+                "voting_path":      voting_path,
+                "filter_reason":    result.get("filter_reason"),
+                "quality_score":    q_score,
+                "fig_type":         fig_type,
+                "area_ratio":       round(area_ratio, 4),
+                "image_width":      image.width,
+                "image_height":     image.height,
+                "image_area":       image.width * image.height,
+                # ── 작업 2: 엔진별 문자/라인 수 ──────────────────────────────
                 "paddle_char_count": paddle_char_count,
+                "surya_char_count":  surya_char_count,
                 "voted_char_count":  voted_char_count,
                 "paddle_line_count": paddle_line_count,
+                "surya_line_count":  surya_line_count,
                 "voted_line_count":  voted_line_count,
             }
 
+            # ── 작업 4: worst-20 수집 ─────────────────────────────────────────
             entry = {
                 "page":          page_no,
                 "fig_type":      fig_type,
                 "quality_score": q_score,
                 "paddle_raw":    "\n".join(paddle_lines),
+                "surya_raw":     "\n".join(surya_lines),
                 "voted_text":    voted_text,
-                "final_text":    None,
+                "final_text":    None,          # processor.py 완료 후 채울 수 없으므로 None
             }
             self._worst_ocr.append(entry)
             # quality_score 오름차순으로 상위 20개만 유지
