@@ -33,6 +33,17 @@ KNOWLEDGE_KEYWORDS = [
     "설명", "알려줘", "내용", "정리해줘", "무슨 내용", "뭐야",
 ]
 
+SUMMARY_KEYWORDS = [
+    "요약", "요약해줘", "요약해", "요약본", "summary",
+]
+
+# 다중 문서 비교 요청 키워드. summary_from_rag로 보정해서
+# 여러 문서의 내용을 종합해서 답변하도록 유도한다.
+COMPARE_KEYWORDS = [
+    "비교", "비교해줘", "비교해", "차이", "차이점", "다른점", "다른 점",
+    "공통점", "공통", "어떻게 달라", "뭐가 달라",
+]
+
 MEMORY_TARGET_KEYWORDS = [
     "지금까지", "대화에서", "대화 내용", "아까", "방금",
     "방금 추출", "방금 정리", "위에서", "이전 대화", "이전 답변",
@@ -65,9 +76,16 @@ def _detect_notion_save(message: str, message_lower: str) -> bool:
 
 
 def _resolve_question_type(question_type: str, has_document_target: bool, mentions_document_target: bool, mentions_task: bool,
-    mentions_knowledge: bool, mentions_memory_target: bool, mentions_notion_save: bool) -> str:
+    mentions_knowledge: bool, mentions_summary: bool, mentions_compare: bool, mentions_memory_target: bool, mentions_notion_save: bool) -> str:
     if mentions_notion_save:
         return "notion_save"
+
+    # 문서 타겟 + 요약/비교 키워드 → summary_from_rag로 보정
+    # (knowledge_search로 잘못 분류되는 것을 방지)
+    # 다중 문서 비교("두 문서 비교해줘")는 DOCUMENT_TARGET_KEYWORDS의
+    # "이 문서/해당 문서" 패턴과 안 맞을 수 있어 mentions_document_target은 체크하지 않는다.
+    if has_document_target and (mentions_summary or mentions_compare):
+        return "summary_from_rag"
 
     if (
         has_document_target
@@ -151,6 +169,8 @@ def classifier_node(state: AgentState) -> AgentState:
         mentions_document_save_target = _contains_any(user_message_lower, DOCUMENT_SAVE_KEYWORDS)
         mentions_task = _contains_any(user_message, TASK_KEYWORDS)
         mentions_knowledge = _contains_any(user_message, KNOWLEDGE_KEYWORDS)
+        mentions_summary = _contains_any(user_message_lower, SUMMARY_KEYWORDS)
+        mentions_compare = _contains_any(user_message_lower, COMPARE_KEYWORDS)
         mentions_memory_target = _contains_any(user_message, MEMORY_TARGET_KEYWORDS)
         mentions_notion_save = _detect_notion_save(user_message, user_message_lower)
 
@@ -160,6 +180,8 @@ def classifier_node(state: AgentState) -> AgentState:
             mentions_document_target=mentions_document_target,
             mentions_task=mentions_task,
             mentions_knowledge=mentions_knowledge,
+            mentions_summary=mentions_summary,
+            mentions_compare=mentions_compare,
             mentions_memory_target=mentions_memory_target,
             mentions_notion_save=mentions_notion_save,
         )
