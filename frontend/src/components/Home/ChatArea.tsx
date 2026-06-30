@@ -98,6 +98,9 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
   const abortControllerRef = useRef<AbortController | null>(null)
   // loading state는 비동기라 useEffect 안에서 즉시 참조가 안 되므로 ref로 동기 추적
   const loadingRef = useRef(false)
+  // room을 막 생성한 직후엔, 문서 연결(linkDocumentToRoom)들이 다 끝나기 전에
+  // activeRoomId 변경으로 트리거된 useEffect가 서버 재조회를 해서 칩이 줄어드는 걸 방지하는 플래그
+  const justCreatedRoomRef = useRef(false)
 
   // 이 채팅방에 연결된 문서/음성 목록 (+ 버튼으로 선택한 것들) — 서버 기준
   const [linkedDocs, setLinkedDocs] = useState<LinkedDoc[]>([])
@@ -183,6 +186,13 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
       return
     }
 
+    // handleSend에서 막 room을 생성하고 문서들을 연결하는 중이면,
+    // 그 연결이 다 끝나기 전에 서버 조회가 끼어들어 칩 개수가 줄어드는 걸 방지
+    if (justCreatedRoomRef.current) {
+      justCreatedRoomRef.current = false
+      return
+    }
+
     fetchRoomDocuments(activeRoomId).then(async (docs) => {
       // 업로드 직후 처음 들어온 방인데, 서버엔 아직 연결이 안 돼있으면 지금 연결해줌
       if (docs.length === 0 && targetDocumentId && targetFilename) {
@@ -265,35 +275,28 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
   }
 
   // + 버튼 클릭 — 보관함 문서/음성 목록을 불러와서 선택 팝오버를 염
-  const openPicker = () => {
-    setPendingSelected(new Set(linkedDocs.map(d => d.document_id)))
-    setShowPicker(true)
-    if (allDocs.length === 0) {
-      setPickerLoading(true)
-      Promise.all([
-        fetch(`${BASE_URL}/api/documents`).then(r => r.json()).catch(() => ({ documents: [] })),
-        fetch(`${BASE_URL}/api/stt/list`).then(r => r.json()).catch(() => ({ data: [] })),
-      ])
-        .then(([docRes, voiceRes]) => {
-          const docs: LinkedDoc[] = (docRes.documents ?? [])
-            .filter((d: any) => d.type !== 'voice')
-            .map((d: any) => ({ document_id: d.document_id, filename: d.filename, type: 'document' }))
-          const voices: LinkedDoc[] = (voiceRes.data ?? []).map((v: any) => ({
-            document_id: v.document_id,
-            filename: v.filename,
-            type: 'voice',
-          }))
-          const combined = [...docs, ...voices]
-          // 같은 이름(공백/인코딩 차이 포함) 문서·음성은 첫 번째 것만 남김
-          const unique = combined.filter((d, i, self) =>
-            i === self.findIndex(x => normalizeFilename(x.filename) === normalizeFilename(d.filename))
-          )
-          setAllDocs(unique)
-        })
-        .catch(err => console.error('문서 목록 불러오기 실패:', err))
-        .finally(() => setPickerLoading(false))
-    }
+const openPicker = () => {
+  setPendingSelected(new Set(linkedDocs.map(d => d.document_id)))
+  setShowPicker(true)
+  if (allDocs.length === 0) {
+    setPickerLoading(true)
+    fetch(`${BASE_URL}/api/documents`)
+      .then(r => r.json())
+      .catch(() => ({ documents: [] }))
+      .then((docRes: any) => {
+        const docs: LinkedDoc[] = (docRes.documents ?? [])
+          .filter((d: any) => d.type !== 'voice')
+          .map((d: any) => ({ document_id: d.document_id, filename: d.filename, type: 'document' }))
+        // 같은 이름(공백/인코딩 차이 포함) 문서는 첫 번째 것만 남김
+        const unique = docs.filter((d, i, self) =>
+          i === self.findIndex(x => normalizeFilename(x.filename) === normalizeFilename(d.filename))
+        )
+        setAllDocs(unique)
+      })
+      .catch(err => console.error('문서 목록 불러오기 실패:', err))
+      .finally(() => setPickerLoading(false))
   }
+}
 
   const togglePending = (id: string) => {
     setPendingSelected(prev => {
@@ -335,7 +338,6 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
   }
 
   const handleSend = async (overrideText?: string) => {
-    console.log('handleSend 시작 시점 linkedDocs:', linkedDocs)
     const userText = (overrideText ?? input).trim()
     if (!userText || loading) return
 
@@ -346,6 +348,7 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
     let roomId = activeRoomId
     if (!roomId) {
       try {
+        justCreatedRoomRef.current = true // setActiveRoomId가 useEffect를 트리거하기 전에 미리 표시
         roomId = await createRoom(userText)
         setActiveRoomId(roomId)
         onRoomCreated()
@@ -354,6 +357,7 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
           await Promise.all(linkedDocs.map(d => linkDocumentToRoom(roomId!, d.document_id)))
         }
       } catch {
+        justCreatedRoomRef.current = false
         setLoading(false)
         loadingRef.current = false
         return
@@ -377,8 +381,7 @@ export default function ChatArea({ activeRoomId, setActiveRoomId, onRoomCreated,
           room_id: roomId,
           content: userText,
           source: linkedDocs.length > 0 ? 'pdf' : 'text',
-          // target_document_id/target_document_ids는 안 보냄 —
-          // 백엔드가 room_id 기준으로 연결된 문서를 자동으로 찾아서 RAG 필터를 구성함
+          target_document_ids: linkedDocs.map(d => d.document_id),
         }),
         signal: abortControllerRef.current.signal,
       })
