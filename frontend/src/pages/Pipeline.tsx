@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import type { Dispatch, SetStateAction } from 'react'
 import { Upload, FileText, CheckCircle, Circle, Loader, AlertCircle } from 'lucide-react'
 
 const BASE_URL = import.meta.env.VITE_API_URL
@@ -8,37 +9,45 @@ const steps = [
   { id: 2, label: 'Agent 흐름 제어', desc: 'LangGraph 노드 분기 처리', detail: 'LangGraph · 입력 유형별 라우팅' },
   { id: 3, label: 'LLM 분석 및 요약', desc: '핵심 내용 요약 · 키워드 추출', detail: 'Qwen2.5 · 회의록 정리 · Task 추출' },
   { id: 4, label: 'RAG 검색', desc: '벡터 DB 검색 · 관련 문서 매칭', detail: 'Vector DB · 임베딩 · 유사도 검색' },
-  { id: 5, label: 'Notion 저장', desc: '분석 결과 자동 저장', detail: 'Notion API · 제목 · 요약 · 키워드' },
-  { id: 6, label: '그래프 시각화', desc: '문서 연관성 노드 시각화', detail: '임베딩 유사도 · 노드/엣지 렌더링' },
+  { id: 5, label: '그래프 시각화', desc: '문서 연관성 노드 시각화', detail: '임베딩 유사도 · 노드/엣지 렌더링' },
 ]
 
-type Status = 'wait' | 'running' | 'done' | 'error'
+export type PipelineStatus = 'wait' | 'running' | 'done' | 'error'
 
 interface PipelineProps {
   onGoToAnalysis: () => void
   reviewFileName: string | null
   onClearReview: () => void
-  onRoomCreated?: () => void
   onFileUploaded?: (filename: string, analysisData?: any) => void
-  onRoomIdCreated?: (roomId: string) => void
   onUploadStart?: (filename: string) => void
   onUploadEnd?: () => void
+  file: string | null
+  setFile: Dispatch<SetStateAction<string | null>>
+  statuses: PipelineStatus[]
+  setStatuses: Dispatch<SetStateAction<PipelineStatus[]>>
+  currentStep: number
+  setCurrentStep: Dispatch<SetStateAction<number>>
+  logs: string[]
+  setLogs: Dispatch<SetStateAction<string[]>>
+  isRunning: boolean
+  setIsRunning: Dispatch<SetStateAction<boolean>>
+  uploadError: string | null
+  setUploadError: Dispatch<SetStateAction<string | null>>
 }
 
-export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview, onRoomCreated, onFileUploaded, onRoomIdCreated, onUploadStart, onUploadEnd }: PipelineProps) {
-  const [file, setFile] = useState<string | null>(null)
-  const [statuses, setStatuses] = useState<Status[]>(Array(6).fill('wait'))
-  const [currentStep, setCurrentStep] = useState(-1)
+export default function Pipeline({
+  onGoToAnalysis, reviewFileName, onClearReview, onFileUploaded, onUploadStart, onUploadEnd,
+  file, setFile, statuses, setStatuses, currentStep, setCurrentStep, logs, setLogs, isRunning, setIsRunning, uploadError, setUploadError,
+}: PipelineProps) {
   const [isDragging, setIsDragging] = useState(false)
-  const [logs, setLogs] = useState<string[]>([])
-  const [isRunning, setIsRunning] = useState(false)
-  const [uploadError, setUploadError] = useState<string | null>(null)
   const [prompt, setPrompt] = useState('')
 
   const addLog = (msg: string) => {
     setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`])
   }
 
+  // 업로드만 함 — 채팅방은 더 이상 자동으로 생성하지 않음.
+  // 문서는 채팅 화면의 + 버튼으로 나중에 원하는 채팅방에 선택해서 연결함
   const startPipeline = async (selectedFile: File) => {
     onUploadStart?.(selectedFile.name)
     setFile(selectedFile.name)
@@ -47,65 +56,50 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
     setUploadError(null)
     setIsRunning(true)
 
-  addLog('채팅방 생성 중...')
-  try {
-    // 1. 채팅방 생성
-    const roomRes = await fetch(`${BASE_URL}/api/conversations`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: selectedFile.name }),
-    })
-    if (!roomRes.ok) throw new Error('채팅방 생성 실패')
-    const roomData = await roomRes.json()
-    const roomId = roomData.room_id
-    addLog(`채팅방 생성 완료 (${roomId})`)
-    onRoomIdCreated?.(roomId)
-
-    // 2. 문서 업로드 (8000만 호출 — 8003 연동은 서버가 알아서 함)
     addLog('문서 업로드 중...')
-    const formData = new FormData()
-    formData.append('file', selectedFile)
-    formData.append('room_id', roomId)
-    formData.append('type', 'document')
+    try {
+      const formData = new FormData()
+      formData.append('file', selectedFile)
+      formData.append('type', 'document')
+      formData.append('room_id', '') 
+      // room_id 없이 업로드 — 백엔드가 필수로 요구하면 지수한테 확인 필요
 
-    const uploadRes = await fetch(`${BASE_URL}/api/documents/upload`, {
-      method: 'POST',
-      body: formData,
-    })
-    if (!uploadRes.ok) throw new Error('문서 업로드 실패')
-    const uploadData = await uploadRes.json()
-    if (uploadData.status === 'error') throw new Error(uploadData.error ?? '문서 처리 실패')
+      const uploadRes = await fetch(`${BASE_URL}/api/documents/upload`, {
+        method: 'POST',
+        body: formData,
+      })
+      if (!uploadRes.ok) throw new Error('문서 업로드 실패')
+      const uploadData = await uploadRes.json()
+      if (uploadData.status === 'error') throw new Error(uploadData.error ?? '문서 처리 실패')
 
-    console.log('업로드 응답:', uploadData)
-    addLog(`문서 처리 완료: ${uploadData.filename}`)
-    addLog('메타데이터 저장 완료 ✓')
+      console.log('업로드 응답:', uploadData)
+      addLog(`문서 처리 완료: ${uploadData.filename}`)
+      addLog('메타데이터 저장 완료 ✓')
 
-    onFileUploaded?.(uploadData.filename, uploadData)
-    setTimeout(() => onRoomCreated?.(), 1000)
+      onFileUploaded?.(uploadData.filename, uploadData)
 
-    // 3. 파이프라인 시작
-    setCurrentStep(0)
+      setCurrentStep(0)
 
-  } catch (err: any) {
-    console.error('업로드 오류:', err)
-    setUploadError(err.message)
-    addLog(`오류: ${err.message}`)
-    setIsRunning(false)
-    onUploadEnd?.()
+    } catch (err: any) {
+      console.error('업로드 오류:', err)
+      setUploadError(err.message)
+      addLog(`오류: ${err.message}`)
+      setIsRunning(false)
+      onUploadEnd?.()
+    }
   }
-}
 
   useEffect(() => {
     if (currentStep < 0 || currentStep >= 6) {
       if (currentStep === 6) {
         setIsRunning(false)
         onUploadEnd?.()
-      if (Notification.permission === 'granted'){
-        new Notification('문서 분석 완료',{
-          body : `${file} 분석이 완료됐어요!`,
-        })
+        if (Notification.permission === 'granted') {
+          new Notification('문서 분석 완료', {
+            body: `${file} 분석이 완료됐어요!`,
+          })
+        }
       }
-    }
       return
     }
     setStatuses(prev => {
@@ -159,7 +153,7 @@ export default function Pipeline({ onGoToAnalysis, reviewFileName, onClearReview
     onClearReview()
   }
 
-  const getIcon = (status: Status) => {
+  const getIcon = (status: PipelineStatus) => {
     if (status === 'done') return <CheckCircle size={18} className="text-blue-500" />
     if (status === 'running') return <Loader size={18} className="text-blue-500 animate-spin" />
     if (status === 'error') return <AlertCircle size={18} className="text-red-400" />

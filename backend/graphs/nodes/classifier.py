@@ -9,6 +9,7 @@ VALID_QUESTION_TYPES = {
     "notion_save",
     "knowledge_search",
     "general_answer",
+    "summary_from_rag",
 }
 
 DOCUMENT_TARGET_KEYWORDS = [
@@ -29,7 +30,7 @@ TASK_KEYWORDS = [
 ]
 
 KNOWLEDGE_KEYWORDS = [
-    "요약", "설명", "알려줘", "내용", "정리해줘", "무슨 내용", "뭐야",
+    "설명", "알려줘", "내용", "정리해줘", "무슨 내용", "뭐야",
 ]
 
 MEMORY_TARGET_KEYWORDS = [
@@ -63,12 +64,11 @@ def _detect_notion_save(message: str, message_lower: str) -> bool:
     return is_notion and has_action
 
 
-def _resolve_question_type(question_type: str, has_document_target: bool, mentions_document_target: bool,
-    mentions_task: bool, mentions_knowledge: bool, mentions_memory_target: bool, mentions_notion_save: bool) -> str:
+def _resolve_question_type(question_type: str, has_document_target: bool, mentions_document_target: bool, mentions_task: bool,
+    mentions_knowledge: bool, mentions_memory_target: bool, mentions_notion_save: bool) -> str:
     if mentions_notion_save:
         return "notion_save"
 
-    # knowledge_search를 task_from_rag보다 먼저 확인
     if (
         has_document_target
         and mentions_document_target
@@ -79,6 +79,18 @@ def _resolve_question_type(question_type: str, has_document_target: bool, mentio
 
     if has_document_target and mentions_document_target and mentions_task:
         return "task_from_rag"
+
+    # 문서 타겟이 있고 문서 관련 키워드가 있으면 summary_from_rag로 보정
+    if (
+        has_document_target
+        and mentions_document_target
+        and question_type == "general_answer"
+    ):
+        return "summary_from_rag"
+
+    # task_from_rag인데 문서 타겟이 없으면 general_answer로 보정
+    if question_type == "task_from_rag" and not has_document_target and not mentions_document_target:
+        return "general_answer"
 
     if question_type == "task_from_memory" and not mentions_memory_target:
         return "general_answer"
@@ -101,7 +113,7 @@ def _build_need_flags(question_type: str, has_document_target: bool, mentions_do
 
     return {
         "need_memory": question_type == "task_from_memory" or notion_requires_memory,
-        "need_rag": question_type in {"task_from_rag", "knowledge_search"} or notion_requires_rag,
+        "need_rag": question_type in {"task_from_rag", "knowledge_search", "summary_from_rag"} or notion_requires_rag,
         "need_task_extract": question_type in {"task_from_rag", "task_from_memory"},
         "need_notion_save": question_type == "notion_save",
         "need_general_answer": question_type == "general_answer",
@@ -133,7 +145,8 @@ def classifier_node(state: AgentState) -> AgentState:
         elif target_filename:
             rag_filter = {"filename": target_filename}
 
-        has_document_target = bool(target_document_id or target_filename)
+        # rag_filter가 있으면 문서 타겟이 있다고 판단
+        has_document_target = bool(target_document_id or target_filename or rag_filter)
         mentions_document_target = _contains_any(user_message_lower, DOCUMENT_TARGET_KEYWORDS)
         mentions_document_save_target = _contains_any(user_message_lower, DOCUMENT_SAVE_KEYWORDS)
         mentions_task = _contains_any(user_message, TASK_KEYWORDS)

@@ -275,17 +275,74 @@ def _answer_knowledge_search(
     cr = rag_search_result.get("collection_results", {})
     searched = rag_search_result.get("searched_collections", [])
 
-    meeting_cr   = cr.get("meeting",  {"count": 0, "low_confidence": True, "data": []})
+    meeting_cr   = cr.get("meeting",   {"count": 0, "low_confidence": True, "data": []})
+    document_cr  = cr.get("document",  {"count": 0, "low_confidence": True, "data": []})
     knowledge_cr = cr.get("knowledge", {"count": 0, "low_confidence": True, "data": []})
 
-    meeting_found        = meeting_cr["count"]  > 0 and not meeting_cr["low_confidence"]
+    meeting_found        = meeting_cr["count"]   > 0 and not meeting_cr["low_confidence"]
+    document_found       = document_cr["count"]  > 0 and not document_cr["low_confidence"]
     knowledge_found      = knowledge_cr["count"] > 0 and not knowledge_cr["low_confidence"]
     # 실제로 meeting_collection을 검색 대상으로 선택했는지 여부
     # → 회의 관련 신호어가 있는 질문에서만 True
     meeting_was_searched = "meeting" in searched
 
-    meeting_context  = _build_context_from_docs(meeting_cr.get("data", []))
+    meeting_context   = _build_context_from_docs(meeting_cr.get("data", []))
+    document_context  = _build_context_from_docs(document_cr.get("data", []))
     knowledge_context = _build_context_from_docs(knowledge_cr.get("data", []))
+
+    # ── 분기 0: 업로드 문서 찾음 ────────────────────────────────
+    # document_collection은 사용자가 직접 업로드한 문서
+    # knowledge/meeting보다 우선순위 높음 (사용자가 특정 문서를 가리킨 경우)
+    if document_found and not meeting_found and not knowledge_found:
+        prompt = f"""[INST]
+{DOBY_SYSTEM_GUIDE}
+
+아래 [참고 문서]는 사용자가 업로드한 문서입니다.
+[참고 문서]이 비어 있지 않다면 절대 "참고 문서가 없다"고 말하지 마세요.
+
+[참고 문서]
+{document_context}
+
+[사용자 질문]
+{user_message}
+
+[답변 규칙]
+- 반드시 [참고 문서]만 근거로 답하세요.
+- 참고 문서에 없는 정보는 추측하지 마세요.
+- 사용자가 요약을 요청하면 핵심 내용을 한국어로 정리하세요.
+- 인사말(안녕하세요 등)로 시작하지 마세요.
+- 마무리 문구(도움이 되셨으면 합니다 등)로 끝내지 마세요.
+- 코드가 포함된 답변이면 반드시 코드 블록(```언어명 ... ```)으로 감싸세요.
+- 인사말 없이 바로 핵심 내용부터 답변하세요.
+- 답변은 한국어로 작성하세요.
+[/INST]"""
+        return _call_ollama(prompt)
+
+    # document + knowledge 둘 다 찾음
+    if document_found and knowledge_found and not meeting_found:
+        combined_context = document_context + "\n\n" + knowledge_context
+        prompt = f"""[INST]
+{DOBY_SYSTEM_GUIDE}
+
+아래 [참고 내용]은 사용자가 업로드한 문서와 관련 기술 문서입니다.
+[참고 내용]이 비어 있지 않다면 절대 "참고 문서가 없다"고 말하지 마세요.
+
+[참고 내용]
+{combined_context}
+
+[사용자 질문]
+{user_message}
+
+[답변 규칙]
+- 반드시 [참고 내용]만 근거로 답하세요.
+- 참고 내용에 없는 정보는 추측하지 마세요.
+- 인사말(안녕하세요 등)로 시작하지 마세요.
+- 마무리 문구(도움이 되셨으면 합니다 등)로 끝내지 마세요.
+- 코드가 포함된 답변이면 반드시 코드 블록(```언어명 ... ```)으로 감싸세요.
+- 인사말 없이 바로 핵심 내용부터 답변하세요.
+- 답변은 한국어로 작성하세요.
+[/INST]"""
+        return _call_ollama(prompt)
 
     # ── 분기 1: 둘 다 찾음 ───────────────────────────────────
     if meeting_found and knowledge_found:
@@ -305,7 +362,10 @@ def _answer_knowledge_search(
 - 먼저 회의록에서 찾은 관련 내용을 요약해서 답하세요.
 - 그 다음, 관련 기술 문서를 바탕으로 구체적인 해결 방법이나 추가 설명을 이어서 제공하세요.
 - 각 출처(회의록 / 기술 문서)를 구분해서 명확히 표시하세요.
-- 인사말 없이 바로 답변하세요.
+- 인사말(안녕하세요 등)로 시작하지 마세요.
+- 마무리 문구(도움이 되셨으면 합니다 등)로 끝내지 마세요.
+- 코드가 포함된 답변이면 반드시 코드 블록(```언어명 ... ```)으로 감싸세요.
+- 인사말 없이 바로 핵심 내용부터 답변하세요.
 - 답변은 한국어로 작성하세요.
 [/INST]"""
         return _call_ollama(prompt)
@@ -324,7 +384,10 @@ def _answer_knowledge_search(
 [답변 규칙]
 - 회의록 내용만을 근거로 답하세요.
 - 회의록에 없는 내용은 추측하지 마세요.
-- 인사말 없이 바로 답변하세요.
+- 인사말(안녕하세요 등)로 시작하지 마세요.
+- 마무리 문구(도움이 되셨으면 합니다 등)로 끝내지 마세요.
+- 코드가 포함된 답변이면 반드시 코드 블록(```언어명 ... ```)으로 감싸세요.
+- 인사말 없이 바로 핵심 내용부터 답변하세요.
 - 답변은 한국어로 작성하세요.
 [/INST]"""
         return _call_ollama(prompt)
@@ -349,7 +412,10 @@ def _answer_knowledge_search(
 - 반드시 [참고 내용]만 근거로 답하세요.
 - 참고 내용에 없는 정보는 추측하지 마세요.
 - 사용자가 요약을 요청하면 핵심 내용을 한국어로 정리하세요.
-- 인사말 없이 바로 답변하세요.
+- 인사말(안녕하세요 등)로 시작하지 마세요.
+- 마무리 문구(도움이 되셨으면 합니다 등)로 끝내지 마세요.
+- 코드가 포함된 답변이면 반드시 코드 블록(```언어명 ... ```)으로 감싸세요.
+- 인사말 없이 바로 핵심 내용부터 답변하세요.
 - 답변은 한국어로 작성하세요.
 [/INST]"""
         return _call_ollama(prompt)
@@ -378,7 +444,10 @@ def _answer_knowledge_search(
 - 먼저 "{meeting_notice}"라고 자연스럽게 안내하세요.
 - 그 다음, 관련 기술 문서를 바탕으로 질문에 답하세요.
 - 기술 문서에 없는 내용은 추측하지 마세요.
-- 인사말 없이 바로 답변하세요.
+- 인사말(안녕하세요 등)로 시작하지 마세요.
+- 마무리 문구(도움이 되셨으면 합니다 등)로 끝내지 마세요.
+- 코드가 포함된 답변이면 반드시 코드 블록(```언어명 ... ```)으로 감싸세요.
+- 인사말 없이 바로 핵심 내용부터 답변하세요.
 - 답변은 한국어로 작성하세요.
 [/INST]"""
         return _call_ollama(prompt)
@@ -465,11 +534,15 @@ def generate_answer_for_graph(
 
     # ── knowledge_search ─────────────────────────────────────
     if question_type == "knowledge_search":
-
-        # 유형 2: rag_search_result가 있으면 컬렉션별 분리 분기 처리
-        # (팀원이 rag_node에서 rag_service 결과를 그대로 state에 담아 넘겨줄 때)
         if rag_search_result:
-            return _answer_knowledge_search(user_message, rag_search_result)
+            cr = rag_search_result.get("collection_results", {})
+            has_results = any(
+                cr.get(key, {}).get("count", 0) > 0
+                for key in ["meeting", "document", "knowledge"]
+            )
+            if has_results:
+                return _answer_knowledge_search(user_message, rag_search_result)
+            # collection_results 비어있음 → rag_context 기반으로 fallback
 
         # 유형 1: target_document_id로 문서를 직접 조회한 경우 (기존 로직 유지)
         # rag_context는 SQLite documents 테이블의 content_markdown 전체
@@ -493,7 +566,10 @@ def generate_answer_for_graph(
 - 반드시 [참고 내용]만 근거로 답하세요.
 - 참고 내용에 없는 정보는 추측하지 마세요.
 - 사용자가 요약을 요청하면 핵심 내용을 한국어로 정리하세요.
-- 인사말 없이 바로 답변하세요.
+- 인사말(안녕하세요 등)로 시작하지 마세요.
+- 마무리 문구(도움이 되셨으면 합니다 등)로 끝내지 마세요.
+- 코드가 포함된 답변이면 반드시 코드 블록(```언어명 ... ```)으로 감싸세요.
+- 인사말 없이 바로 핵심 내용부터 답변하세요.
 - 답변은 한국어로 작성하세요.
 [/INST]"""
         return _call_ollama(prompt)
@@ -510,6 +586,9 @@ def generate_answer_for_graph(
 - 담당자, 할 일, 마감일이 있으면 구분해서 정리해라.
 - 없는 정보는 임의로 만들지 마라.
 - 마감일 형식은 가능한 한 통일해서 보여줘라.
+- 인사말(안녕하세요 등)로 시작하지 마라.
+- 마무리 문구(도움이 되셨으면 합니다 등)로 끝내지 마라.
+- 인사말 없이 바로 핵심 내용부터 답변해라.
 - 답변은 한국어로 작성해라.
 
 사용자 질문:
@@ -517,6 +596,32 @@ def generate_answer_for_graph(
 
 할 일 목록:
 {task_context}
+[/INST]"""
+        return _call_ollama(prompt)
+
+    # ── summary_from_rag ──
+    if question_type == "summary_from_rag" and rag_context:
+        trimmed_context = rag_context[:12000]
+        prompt = f"""[INST]
+{DOBY_SYSTEM_GUIDE}
+
+아래 [참고 문서]는 사용자가 업로드한 문서 또는 회의록입니다.
+[참고 문서]이 비어 있지 않다면 절대 "참고 문서가 없다"고 말하지 마세요.
+
+[참고 문서]
+{trimmed_context}
+
+[사용자 질문]
+{user_message}
+
+[답변 규칙]
+- 반드시 [참고 문서]만 근거로 요약하세요.
+- 참고 문서에 없는 내용은 추가하지 마세요.
+- 핵심 주제, 주요 결론, 중요 수치나 이름 위주로 정리하세요.
+- 인사말(안녕하세요 등)로 시작하지 마세요.
+- 마무리 문구(도움이 되셨으면 합니다 등)로 끝내지 마세요.
+- 인사말 없이 바로 핵심 내용부터 답변하세요.
+- 답변은 한국어로 작성하세요.
 [/INST]"""
         return _call_ollama(prompt)
 
@@ -564,7 +669,7 @@ def extract_tasks_from_content(content: str) -> list[dict]:
         return []
 
     prompt = f"""[INST]
-아래 회의록 또는 문서에서 담당자별 할 일을 JSON 배열로만 추출해줘.
+아래 내용에서 담당자별 할 일을 JSON 배열로만 추출해줘.
 
 [규칙]
 - 반드시 JSON 배열만 반환해라.
@@ -574,10 +679,17 @@ def extract_tasks_from_content(content: str) -> list[dict]:
 - status 기본값은 "todo"로 둔다.
 - 원문에 없는 내용은 만들지 마라.
 - 설명 문장은 쓰지 마라.
+- 회의록뿐 아니라 대화 기록, 채팅 내용에서도 할 일을 추출해라.
+- "~해야 해", "~하기로 했어", "~할게", "~맡을게" 같은 표현도 할 일로 인식해라.
+- 사용자의 질문 자체("~가 뭐야?", "~해줘", "~추출해줘" 등)는 할 일로 추출하지 마라.
+- 실제 업무, 담당자, 마감일이 언급된 경우에만 할 일로 추출해라.
+- 추출할 할 일이 없으면 빈 배열 []을 반환해라.
 
 [마감일 규칙]
 - 원문에 연도가 있으면 "YYYY년 M월 D일" 형식으로 작성해라.
 - 원문에 연도가 없고 월/일만 있으면 원문 표현 그대로 사용해라.
+- "다음 주", "금요일", "내일", "이번 주" 같은 상대적 표현은 그대로 반환해라.
+- 절대로 연도나 월을 임의로 추가하거나 변환하지 마라.
 - 마감일을 알 수 없으면 null로 둔다.
 
 원본 내용:
@@ -611,7 +723,14 @@ def generate_summary_for_notion(content: str) -> str | None:
 
 요약:
 [/INST]"""
-    return _call_ollama(prompt)
+    result = _call_ollama(prompt)
+
+    # 최종 중국어 감지 시 None 반환 (저장 안 함)
+    if has_chinese(result):
+        print("[generate_summary_for_notion] 중국어 감지 → None 반환")
+        return None
+
+    return result
 
 
 # ── 화자분리 보완 ─────────────────────────────────────────────
@@ -694,6 +813,140 @@ def _parse_json_array(text: str) -> list[dict]:
         except:
             return []
 
+# ── 음성 회의록 분석 함수들 ───────────────────────────────────
+
+def generate_voice_summary(content: str) -> str | None:
+    """음성 전사 내용 요약 (한두 문단)"""
+    if not content or not content.strip():
+        return None
+
+    prompt = f"""[INST]
+아래는 음성 회의록의 전사 내용입니다. 전체 내용을 한두 문단으로 요약해줘.
+
+[규칙]
+- 회의의 주요 주제와 결론을 중심으로 요약해라.
+- 원본에 없는 내용은 추가하지 마라.
+- 한국어로 작성해라.
+- 제목은 만들지 마라.
+- 2~3문단 이내로 작성해라.
+
+전사 내용:
+{content[:8000]}
+
+요약:
+[/INST]"""
+    return _call_ollama(prompt)
+
+
+def extract_keywords_with_count(content: str) -> list[dict]:
+    """
+    음성/문서 내용에서 핵심 키워드와 빈도수 추출.
+    반환: [{"word": "마케팅", "count": 24}, ...]
+    """
+    if not content or not content.strip():
+        return []
+
+    # 빈도수는 LLM 추출 후 실제 텍스트에서 카운트
+    prompt = f"""[INST]
+아래 내용에서 핵심 키워드 10~15개를 추출해줘.
+반드시 JSON 배열로만 반환해라. 다른 설명은 쓰지 마라.
+
+[규칙]
+- 조사, 접속사, 대명사 등 의미 없는 단어는 제외해라.
+- 기술 용어, 프로젝트명, 담당자명, 주요 업무 키워드 위주로 추출해라.
+- 반드시 아래 형식의 JSON 배열만 반환해라.
+
+출력 형식:
+["키워드1", "키워드2", "키워드3"]
+
+내용:
+{content[:6000]}
+
+JSON:
+[/INST]"""
+
+    raw = _call_ollama(prompt)
+
+    # JSON 파싱
+    try:
+        cleaned = re.sub(r"```json|```", "", raw.strip()).strip()
+        keywords = json.loads(cleaned)
+        if not isinstance(keywords, list):
+            return []
+    except Exception:
+        match = re.search(r"\[.*?\]", raw, re.DOTALL)
+        if not match:
+            return []
+        try:
+            keywords = json.loads(match.group(0))
+        except Exception:
+            return []
+
+    # 실제 텍스트에서 빈도수 카운트
+    result = []
+    content_lower = content.lower()
+    for kw in keywords:
+        if not isinstance(kw, str) or not kw.strip():
+            continue
+        count = content_lower.count(kw.lower())
+        if count > 0:
+            result.append({"word": kw.strip(), "count": count})
+
+    # 빈도수 내림차순 정렬
+    result.sort(key=lambda x: x["count"], reverse=True)
+    return result
+
+
+def extract_timestamps(transcription: list[dict]) -> list[dict]:
+    """
+    STT transcription에서 주요 발화 타임스탬프 추출.
+    transcription: [{"speaker": "SPEAKER_00", "start": 0.0, "end": 3.2, "text": "..."}]
+    반환: [{"time": "00:14:30", "summary": "신규 채널 전략 논의"}, ...]
+    """
+    if not transcription:
+        return []
+
+    # 전사 내용을 텍스트로 변환
+    transcript_text = "\n".join(
+        f"[{int(s.get('start', 0) // 60):02d}:{int(s.get('start', 0) % 60):02d}] "
+        f"{s.get('speaker', 'SPEAKER')}: {s.get('text', '')}"
+        for s in transcription
+    )
+
+    prompt = f"""[INST]
+아래는 음성 회의록의 타임스탬프별 전사 내용입니다.
+중요한 발화 10개 이내를 골라서 각 시간대의 핵심 내용을 한 줄로 요약해줘.
+반드시 JSON 배열로만 반환해라. 다른 설명은 쓰지 마라.
+
+출력 형식:
+[
+  {{"time": "00:00", "summary": "회의 시작 및 안건 소개"}},
+  {{"time": "05:30", "summary": "신규 기능 개발 방향 논의"}}
+]
+
+전사 내용:
+{transcript_text[:6000]}
+
+JSON:
+[/INST]"""
+
+    raw = _call_ollama(prompt)
+
+    try:
+        cleaned = re.sub(r"```json|```", "", raw.strip()).strip()
+        result = json.loads(cleaned)
+        if isinstance(result, list):
+            return result
+    except Exception:
+        match = re.search(r"\[.*\]", raw, re.DOTALL)
+        if match:
+            try:
+                result = json.loads(match.group(0))
+                if isinstance(result, list):
+                    return result
+            except Exception:
+                pass
+    return []
 
 # ── 테스트 ────────────────────────────────────────────────────
 if __name__ == "__main__":

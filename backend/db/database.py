@@ -16,10 +16,6 @@ def get_connection():
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
 
-    # 현재 프로젝트는 FK 강제 정책을 전체적으로 통일하지 않았으므로 보류
-    # 필요 시 전체 DB 정책 확정 후 아래 옵션 사용
-    # conn.execute("PRAGMA foreign_keys = ON")
-
     return conn
 
 
@@ -72,10 +68,6 @@ def init_db():
     """)
 
     # 5. documents
-    # chroma_status: ChromaDB 적재 상태
-    #   pending → 적재 대기 (업로드 직후 기본값)
-    #   success → 적재 완료 (검색 가능)
-    #   failed  → 적재 실패 (재시도 필요)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS documents (
         id               TEXT PRIMARY KEY,
@@ -128,22 +120,41 @@ def init_db():
     )
     """)
 
-    # ── 마이그레이션 (기존 DB에 컬럼 없을 때 자동 추가) ────
+    # 8. room_document_links (방-문서 다대다 연결)
+    # 한 문서가 여러 방에 연결되거나, 한 방에 여러 문서가 연결될 수 있다.
+    # RAG 검색 시 room_id → document_id 목록 조회에 사용한다.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS room_document_links (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        room_id     TEXT NOT NULL,
+        document_id TEXT NOT NULL,
+        created_at  TEXT NOT NULL,
+        UNIQUE(room_id, document_id)
+    )
+    """)
+
+    # ── 마이그레이션 (기존 DB에 컬럼/테이블 없을 때 자동 추가) ────
     migrations = [
         "ALTER TABLE documents ADD COLUMN json_path TEXT DEFAULT ''",
         "ALTER TABLE documents ADD COLUMN content_markdown TEXT DEFAULT ''",
         "ALTER TABLE documents ADD COLUMN metadata TEXT DEFAULT '{}'",
         "ALTER TABLE tasks ADD COLUMN priority TEXT DEFAULT 'medium'",
-        # chroma_status 추가: pending(적재 대기) / success(적재 완료) / failed(적재 실패)
         "ALTER TABLE documents ADD COLUMN chroma_status TEXT DEFAULT 'pending'",
+        # room_document_links 테이블 추가
+        """CREATE TABLE IF NOT EXISTS room_document_links (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            room_id     TEXT NOT NULL,
+            document_id TEXT NOT NULL,
+            created_at  TEXT NOT NULL,
+            UNIQUE(room_id, document_id)
+        )""",
     ]
 
     for sql in migrations:
         try:
             cursor.execute(sql)
-            print(f"[migration] 적용: {sql}")
+            print(f"[migration] 적용: {sql[:60]}...")
         except Exception:
-            # 이미 존재하는 컬럼이면 무시
             pass
 
     conn.commit()

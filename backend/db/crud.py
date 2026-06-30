@@ -105,10 +105,6 @@ def update_conversation_timestamp(conversation_id: str):
 
 
 def get_conversations() -> list:
-    """
-    전체 채팅방 목록을 최신순으로 조회한다.
-    각 채팅방의 최근 문서 제목도 함께 조회한다.
-    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -118,7 +114,8 @@ def get_conversations() -> list:
             c.title,
             c.created_at,
             c.updated_at,
-            d.title AS filename
+            d.title AS filename,
+            d.id AS document_id
         FROM conversations c
         LEFT JOIN documents d
             ON d.id = (
@@ -155,10 +152,6 @@ def get_conversation_by_id(room_id: str):
 
 
 def delete_conversation(room_id: str) -> bool:
-    """
-    채팅방과 연관된 모든 데이터를 삭제한다.
-    document_chunks는 documents를 기준으로 연결되어 있으므로 documents 삭제 전에 먼저 삭제한다.
-    """
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -210,6 +203,13 @@ def delete_conversation(room_id: str) -> bool:
     )
     cursor.execute(
         """
+        DELETE FROM room_document_links
+        WHERE room_id = ?
+        """,
+        (room_id,),
+    )
+    cursor.execute(
+        """
         DELETE FROM conversations
         WHERE id = ?
         """,
@@ -224,9 +224,6 @@ def delete_conversation(room_id: str) -> bool:
 
 
 def delete_all_conversations_and_messages() -> dict:
-    """
-    전체 채팅방 및 연관 데이터를 전부 삭제한다.
-    """
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -235,6 +232,7 @@ def delete_all_conversations_and_messages() -> dict:
     cursor.execute("DELETE FROM messages")
     cursor.execute("DELETE FROM summaries")
     cursor.execute("DELETE FROM important_facts")
+    cursor.execute("DELETE FROM room_document_links")
     cursor.execute("DELETE FROM documents")
     cursor.execute("DELETE FROM conversations")
 
@@ -346,7 +344,6 @@ def delete_message(message_id: str) -> bool:
 
 # ==========================================
 # 3. summaries CRUD
-# memory_node에서 대화 요약 저장/조회 시 사용
 # ==========================================
 
 def insert_summary(conversation_id: str, summary_text: str, token_count: int = None):
@@ -391,7 +388,6 @@ def get_latest_summary(conversation_id: str) -> dict | None:
 
 # ==========================================
 # 4. important_facts CRUD
-# memory_node에서 중요 정보 저장/조회 시 사용
 # ==========================================
 
 def insert_fact(conversation_id: str, fact_text: str, category: str = "환경"):
@@ -438,12 +434,6 @@ def get_all_facts(conversation_id: str) -> list:
 # ==========================================
 
 def save_document_metadata(doc: dict) -> str:
-    """
-    문서/STT 결과 메타데이터를 documents 테이블에 저장한다.
-
-    metadata는 STT 상세 조회에서 duration_sec, model_used, original_file_url 등을
-    복원하기 위해 JSON 문자열 형태로 저장한다.
-    """
     doc_id = doc.get("id") or str(uuid.uuid4())
     now = get_utc_now()
 
@@ -507,9 +497,6 @@ def save_document_metadata(doc: dict) -> str:
 
 
 def get_documents(conversation_id: str) -> list:
-    """
-    특정 채팅방의 문서 목록을 조회한다.
-    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -538,10 +525,6 @@ def get_documents(conversation_id: str) -> list:
 
 
 def get_document_by_id(document_id: str) -> dict | None:
-    """
-    document_id 기준으로 문서 단건을 조회한다.
-    STT 상세 조회에서도 사용한다.
-    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -575,10 +558,6 @@ def get_document_by_id(document_id: str) -> dict | None:
 
 
 def get_all_documents() -> list:
-    """
-    전체 문서 목록 조회.
-    voice 타입은 제외하고 document/meeting 타입만 반환한다.
-    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -604,10 +583,6 @@ def get_all_documents() -> list:
 
 
 def get_latest_document_by_conversation(conversation_id: str) -> dict | None:
-    """
-    특정 채팅방의 가장 최근 업로드 문서를 조회한다.
-    chat_service에서 target_document_id 보완할 때 사용한다.
-    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -630,9 +605,6 @@ def get_document_by_filename_and_conversation(
     conversation_id: str,
     filename: str,
 ) -> dict | None:
-    """
-    특정 채팅방에서 파일명으로 문서를 조회한다.
-    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -653,12 +625,6 @@ def get_document_by_filename_and_conversation(
 
 
 def _get_voice_documents(conversation_id: str | None = None) -> list[dict]:
-    """
-    음성 문서 목록 조회 공통 함수.
-
-    conversation_id가 있으면 특정 채팅방의 음성 목록을 조회하고,
-    없으면 전체 업로드 음성 목록을 조회한다.
-    """
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -712,26 +678,14 @@ def _get_voice_documents(conversation_id: str | None = None) -> list[dict]:
 
 
 def get_all_voice_documents() -> list[dict]:
-    """
-    업로드된 모든 음성 문서 목록을 조회한다.
-    프론트 음성 목록 페이지에서 사용한다.
-    """
     return _get_voice_documents()
 
 
 def get_voice_documents_by_conversation(conversation_id: str) -> list[dict]:
-    """
-    특정 채팅방에 업로드된 음성 문서 목록을 조회한다.
-    필요 시 채팅방별 필터링에 사용한다.
-    """
     return _get_voice_documents(conversation_id=conversation_id)
 
 
 def delete_document(document_id: str) -> bool:
-    """
-    documents 테이블에서 특정 문서 하나를 삭제한다.
-    document_chunks 삭제는 호출부에서 먼저 처리하는 것을 권장한다.
-    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -885,24 +839,13 @@ def get_tasks(conversation_id: str) -> list:
 
 
 def get_tasks_by_document(document_id: str) -> list:
-    """
-    특정 문서에서 추출된 task 목록을 조회한다.
-    문서 상세 조회 API에서 사용한다.
-    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
         """
         SELECT
-            id,
-            document_id,
-            conversation_id,
-            task,
-            assignee,
-            deadline,
-            status,
-            priority,
-            created_at
+            id, document_id, conversation_id,
+            task, assignee, deadline, status, priority, created_at
         FROM tasks
         WHERE document_id = ?
         ORDER BY created_at DESC
@@ -911,7 +854,6 @@ def get_tasks_by_document(document_id: str) -> list:
     )
     rows = cursor.fetchall() or []
     conn.close()
-
     return [dict(row) for row in rows]
 
 
@@ -970,15 +912,9 @@ def delete_task(task_id: str) -> bool:
 
 # ==========================================
 # 7. document_chunks CRUD
-# STT 발화(transcription) 단위 저장/조회.
-# ChromaDB 검색용 chunk와는 별개.
-# 화면 표시/사용자 수정용.
 # ==========================================
 
 def save_document_chunks(document_id: str, transcription: list[dict]) -> int:
-    """
-    STT transcription 결과를 document_chunks 테이블에 저장한다.
-    """
     if not document_id or not transcription:
         return 0
 
@@ -1025,9 +961,6 @@ def save_document_chunks(document_id: str, transcription: list[dict]) -> int:
 
 
 def get_document_chunks(document_id: str) -> list:
-    """
-    특정 문서의 chunk 전체를 순서대로 조회한다.
-    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -1056,10 +989,6 @@ def get_document_chunks(document_id: str) -> list:
 
 
 def update_chunk_content(chunk_id: int, new_content: str) -> bool:
-    """
-    사용자가 발화 내용을 수정했을 때 content를 갱신하고,
-    user_edited를 1로 표시한다.
-    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -1079,10 +1008,6 @@ def update_chunk_content(chunk_id: int, new_content: str) -> bool:
 
 
 def delete_document_chunks(document_id: str) -> int:
-    """
-    특정 문서의 chunk 전체를 삭제한다.
-    STT 재처리 또는 재적재 시 중복 저장을 방지하기 위해 사용한다.
-    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -1100,10 +1025,6 @@ def delete_document_chunks(document_id: str) -> int:
 
 
 def update_chroma_status(document_id: str, status: str) -> bool:
-    """
-    documents 테이블의 chroma_status를 업데이트한다.
-    status: "pending" / "success" / "failed"
-    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -1117,10 +1038,6 @@ def update_chroma_status(document_id: str, status: str) -> bool:
 
 
 def get_documents_by_chroma_status(status: str) -> list:
-    """
-    chroma_status 기준으로 문서 목록 조회.
-    재시도 대상 조회: get_documents_by_chroma_status("failed")
-    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -1133,3 +1050,100 @@ def get_documents_by_chroma_status(status: str) -> list:
     rows = cursor.fetchall() or []
     conn.close()
     return [dict(row) for row in rows]
+
+
+# ==========================================
+# 8. room_document_links CRUD
+# ==========================================
+
+def link_document_to_room(room_id: str, document_id: str) -> bool:
+    now = get_utc_now()
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            INSERT OR IGNORE INTO room_document_links (room_id, document_id, created_at)
+            VALUES (?, ?, ?)
+            """,
+            (room_id, document_id, now),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        print(f"[link_document_to_room] 오류: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def unlink_document_from_room(room_id: str, document_id: str) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        DELETE FROM room_document_links
+        WHERE room_id = ? AND document_id = ?
+        """,
+        (room_id, document_id),
+    )
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return deleted > 0
+
+
+def get_document_ids_by_room(room_id: str) -> list[str]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT document_id FROM room_document_links
+        WHERE room_id = ?
+        ORDER BY created_at DESC
+        """,
+        (room_id,),
+    )
+    rows = cursor.fetchall() or []
+    conn.close()
+    return [row["document_id"] for row in rows]
+
+
+def get_documents_by_room_id_v2(room_id: str) -> list:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT d.id, d.title, d.type, d.source, d.chroma_status, d.created_at
+        FROM room_document_links rdl
+        JOIN documents d ON d.id = rdl.document_id
+        WHERE rdl.room_id = ?
+        ORDER BY rdl.created_at DESC
+        """,
+        (room_id,),
+    )
+    rows = cursor.fetchall() or []
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def get_documents_by_room_id(room_id: str) -> list:
+    return get_documents_by_room_id_v2(room_id)
+
+
+def get_document_by_title_and_room(room_id: str, title: str) -> dict | None:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT d.id, d.title, d.type, d.source, d.chroma_status, d.created_at
+        FROM room_document_links rdl
+        JOIN documents d ON d.id = rdl.document_id
+        WHERE rdl.room_id = ? AND d.title LIKE ?
+        ORDER BY rdl.created_at DESC LIMIT 1
+        """,
+        (room_id, f"%{title}%"),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None

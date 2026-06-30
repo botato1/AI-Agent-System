@@ -4,7 +4,7 @@ interface Props {
 
 export default function TabOriginal({ analysisData }: Props) {
   const filename = analysisData?.filename ?? '문서'
-  const content = analysisData?.content ?? '내용을 불러올 수 없습니다.'
+  const content = analysisData?.raw?.original_text || '내용을 불러올 수 없습니다.'
   const createdAt = analysisData?.created_at
     ? new Date(analysisData.created_at).toLocaleDateString('ko-KR')
     : '—'

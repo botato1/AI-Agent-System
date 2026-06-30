@@ -14,22 +14,29 @@ from backend.modules.rag.chroma_client import (
     MEETING_COLLECTION,
     DOCUMENT_COLLECTION,
     KNOWLEDGE_COLLECTION,
+    CONTEXT_TO_COLLECTION,
+)
+from backend.db.crud import (
+    get_documents_by_room_id,
+    get_document_by_title_and_room,
 )
 
 # ── 상수 ─────────────────────────────────────────────────────
 CANDIDATE_K  = 40
 SCALE_FACTOR = 0.0005
 
-# 8개 질문 실측 기준: 관련있음 0.7~0.99, 무관 0.3 미만
-LOW_CONFIDENCE_THRESHOLD = 0.3
+# 8개 질문 실측 기준: 관련있음 0.6~0.99, 무관 0.4 미만
+LOW_CONFIDENCE_THRESHOLD = 0.4
 
 MEETING_SIGNALS = [
     "회의록", "회의", "저번에", "저번", "말했던", "논의했던", "논의",
     "액션아이템", "참석자", "지난번", "지난", "미팅",
+    "담당자", "담당", "할일", "할 일", "누구", "마감",
+    "스프린트", "배포 담당",
 ]
 DOCUMENT_SIGNALS = [
     "문서", "파일", "보냈던", "올린", "자료",
-    "보고서", "pdf", "첨부",
+    "보고서", "pdf", "첨부", "요약", "정리",
 ]
 KNOWLEDGE_SIGNALS = [
     # 일반 기술 키워드
@@ -236,6 +243,58 @@ def _empty_collection_result() -> dict:
     return {"count": 0, "low_confidence": True, "top_score": 0.0, "data": []}
 
 
+def _is_room_query(query: str) -> bool:
+    q = query.lower()
+    return any(s in q for s in MEETING_SIGNALS + DOCUMENT_SIGNALS)
+
+
+def _make_collection_result_skip(documents: list, top_k: int, skip_threshold: bool = False) -> dict:
+    sliced = documents[:top_k]
+    top_score = sliced[0]["score"] if sliced else 0.0
+    return {
+        "count": len(sliced),
+        "low_confidence": False if skip_threshold else top_score < LOW_CONFIDENCE_THRESHOLD,
+        "top_score": round(top_score, 4),
+        "data": sliced,
+    }
+
+
+def _search_and_rerank(query: str, collection_name: str, filter_dict, skip_threshold: bool = False) -> dict:
+    raw = search_hybrid(query_text=query, top_k=CANDIDATE_K, filter=filter_dict, collection_name=collection_name)
+    if not raw:
+        return _empty_collection_result()
+    raw = rerank_results(query, raw)
+    raw = _apply_final_score(raw)
+    formatted = _format_documents(raw)
+    return _make_collection_result_skip(formatted, top_k=5, skip_threshold=skip_threshold)
+
+
+def _search_room_docs(query: str, room_docs: list, collection_results: dict, skip_threshold: bool = False):
+    meeting_ids = [d["id"] for d in room_docs if d.get("type") in ("voice", "meeting")]
+    document_ids = [d["id"] for d in room_docs if d.get("type") == "document"]
+
+    if meeting_ids:
+        f = {"document_id": {"$in": meeting_ids}} if len(meeting_ids) > 1 else {"document_id": meeting_ids[0]}
+        collection_results["meeting"] = _search_and_rerank(query, MEETING_COLLECTION, f, skip_threshold)
+
+    if document_ids:
+        f = {"document_id": {"$in": document_ids}} if len(document_ids) > 1 else {"document_id": document_ids[0]}
+        collection_results["document"] = _search_and_rerank(query, DOCUMENT_COLLECTION, f, skip_threshold)
+
+
+def _build_empty_result(query: str, collection_results: dict) -> dict:
+    return {
+        "status": "success",
+        "query": query,
+        "count": 0,
+        "data": [],
+        "low_confidence": True,
+        "collection_results": collection_results,
+        "searched_collections": [],
+        "error": None,
+    }
+
+
 class RAGService:
 
     @staticmethod
@@ -243,10 +302,183 @@ class RAGService:
         query: str,
         original_query: str = None,
         top_k: int = 5,
-        relative_threshold: float = 0.5,  # 호환성 유지, 실제 필터링에 미사용
+        relative_threshold: float = 0.5,
         filter: dict = None,
         question_type: str = "general_answer",
+        room_id: str = "",
     ):
+        print(f"[RAG Service] 쿼리: '{query}' / 타입: '{question_type}'")
+        print(f"[RAG Service] room_id: {room_id}, filter: {filter}")
+
+        try:
+            # document_ids 배열 → $in 필터로 변환
+            filter = _resolve_filter(filter)
+
+            collection_results = {
+                "meeting": _empty_collection_result(),
+                "document": _empty_collection_result(),
+                "knowledge": _empty_collection_result(),
+            }
+
+            # ── task_from_rag / summary_from_rag / notion_save ──
+            if question_type in ("task_from_rag", "summary_from_rag", "notion_save") and room_id:
+                room_docs = get_documents_by_room_id(room_id)
+                print(f"[RAG Service] room_docs: {room_docs}")
+                if not room_docs:
+                    print(f"[RAG Service] room_id={room_id} 에 문서 없음")
+                    return _build_empty_result(query, collection_results)
+
+                target_docs = room_docs
+                for doc in room_docs:
+                    title = doc.get("title", "")
+                    clean_title = title.replace(".pdf", "").replace(".docx", "").replace(".md", "")
+                    if clean_title and clean_title in query:
+                        target_docs = [doc]
+                        print(f"[RAG Service] 특정 문서 감지: {title}")
+                        break
+
+                _search_room_docs(query, target_docs, collection_results, skip_threshold=True)
+
+            # ── knowledge_search ──
+            elif question_type == "knowledge_search":
+                if room_id and _is_room_query(query):
+                    room_docs = get_documents_by_room_id(room_id)
+                    if room_docs:
+                        _search_room_docs(query, room_docs, collection_results)
+                    else:
+                        print(f"[RAG Service] room_id={room_id} 에 문서 없음 → knowledge 검색")
+                        collection_results["knowledge"] = _search_and_rerank(query, KNOWLEDGE_COLLECTION, None)
+                elif filter:
+                    # filter 기반 기존 방식
+                    collections_with_queries = _select_collections_with_queries(
+                        question_type=question_type, query=query, filter=filter,
+                    )
+                    collections = [col for col, _ in collections_with_queries]
+                    per_col: dict[str, list] = {"meeting": [], "document": [], "knowledge": []}
+                    seen_ids: set = set()
+                    for col, col_query in collections_with_queries:
+                        raw = search_hybrid(query_text=col_query, top_k=CANDIDATE_K, filter=filter, collection_name=col)
+                        unique = [r for r in raw if r["id"] not in seen_ids]
+                        for r in unique:
+                            seen_ids.add(r["id"])
+                        if not unique:
+                            continue
+                        unique = rerank_results(query, unique)
+                        unique = _apply_final_score(unique)
+                        formatted = _format_documents(unique)
+                        key = COL_KEY_MAP.get(col, "knowledge")
+                        per_col[key].extend(formatted)
+                    collection_results = {
+                        key: (_make_collection_result(per_col[key], top_k) if per_col[key] else _empty_collection_result())
+                        for key in ["meeting", "document", "knowledge"]
+                    }
+                else:
+                    collection_results["knowledge"] = _search_and_rerank(query, KNOWLEDGE_COLLECTION, None)
+
+            # ── 기타 (filter 기반 기존 방식) ──
+            else:
+                if filter:
+                    collections_with_queries = _select_collections_with_queries(
+                        question_type=question_type, query=query, filter=filter,
+                    )
+                    per_col: dict[str, list] = {"meeting": [], "document": [], "knowledge": []}
+                    seen_ids: set = set()
+                    for col, col_query in collections_with_queries:
+                        raw = search_hybrid(query_text=col_query, top_k=CANDIDATE_K, filter=filter, collection_name=col)
+                        unique = [r for r in raw if r["id"] not in seen_ids]
+                        for r in unique:
+                            seen_ids.add(r["id"])
+                        if not unique:
+                            continue
+                        unique = rerank_results(query, unique)
+                        unique = _apply_final_score(unique)
+                        formatted = _format_documents(unique)
+                        key = COL_KEY_MAP.get(col, "knowledge")
+                        per_col[key].extend(formatted)
+                    collection_results = {
+                        key: (_make_collection_result(per_col[key], top_k) if per_col[key] else _empty_collection_result())
+                        for key in ["meeting", "document", "knowledge"]
+                    }
+
+            # ── 전체 합산 ──
+            all_docs = []
+            for key in ["meeting", "document", "knowledge"]:
+                all_docs.extend(collection_results[key].get("data", []))
+
+            if not all_docs:
+                return _build_empty_result(query, collection_results)
+
+            all_docs.sort(key=lambda x: x["score"], reverse=True)
+            top_documents = all_docs[:top_k]
+            top_score = top_documents[0]["score"] if top_documents else 0
+
+            any_skip = any(
+                not v.get("low_confidence", True)
+                for v in collection_results.values()
+                if v.get("count", 0) > 0
+            )
+            is_low_confidence = False if any_skip else top_score < LOW_CONFIDENCE_THRESHOLD
+
+            cr = collection_results
+            print(
+                f"[RAG Service] 완료 → {len(top_documents)}개 반환 "
+                f"(최고 score: {top_score:.4f}, 신뢰도: {'낮음' if is_low_confidence else '정상'})"
+            )
+            print(
+                f"[RAG Service] 컬렉션별 → "
+                f"meeting={cr['meeting']['count']}개"
+                f"({'낮음' if cr['meeting']['low_confidence'] else '정상'}), "
+                f"document={cr['document']['count']}개"
+                f"({'낮음' if cr['document']['low_confidence'] else '정상'}), "
+                f"knowledge={cr['knowledge']['count']}개"
+                f"({'낮음' if cr['knowledge']['low_confidence'] else '정상'})"
+            )
+
+            return {
+                "status": "success",
+                "query":  query,
+                "count":  len(top_documents),
+                "data":   top_documents,
+                "low_confidence": is_low_confidence,
+                "collection_results": collection_results,
+                "searched_collections": [k for k, v in collection_results.items() if v["count"] > 0],
+                "error":  None,
+            }
+
+        except Exception as e:
+            print(f"[RAG Service 에러]: {str(e)}")
+            empty = _empty_collection_result()
+            return {
+                "status": "error",
+                "query":  query,
+                "count":  0,
+                "data":   [],
+                "low_confidence": True,
+                "collection_results": {
+                    "meeting": empty, "document": empty, "knowledge": empty,
+                },
+                "error": f"RAG 파이프라인 장애: {str(e)}",
+            }
+
+    @staticmethod
+    def retrieve_relevant_knowledge_sync(
+        query: str,
+        original_query: str = None,
+        top_k: int = 5,
+        relative_threshold: float = 0.5,
+        filter: dict = None,
+        question_type: str = "general_answer",
+        room_id: str = "",
+    ) -> dict:
+        return RAGService.retrieve_relevant_knowledge(
+            query=query,
+            original_query=original_query,
+            top_k=top_k,
+            relative_threshold=relative_threshold,
+            filter=filter,
+            question_type=question_type,
+            room_id=room_id,
+        )
         """
         흐름:
         1. _select_collections()로 검색할 컬렉션(들) 결정

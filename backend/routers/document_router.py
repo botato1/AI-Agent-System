@@ -47,7 +47,7 @@ def get_document_list():
 @router.post("/upload")
 async def upload_document(
     file: UploadFile = File(...),
-    room_id: str = Form(...),
+    room_id: str | None = Form(None),
     document_type: Literal["document", "meeting"] = Form("document", alias="type"),
 ):
     return await upload_and_process_document(

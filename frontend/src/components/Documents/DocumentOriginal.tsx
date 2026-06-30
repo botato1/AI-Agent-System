@@ -1,48 +1,60 @@
-//문서보관함 원본 보기
-import { ArrowLeft, FileText, File } from 'lucide-react'
-import type { FileItem } from '../../data/documentsData'
+import { useState, useEffect } from 'react'
+import { ArrowLeft, FileText, File, Clock, AlertTriangle, Table2 } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+
+const BASE_URL = import.meta.env.VITE_API_URL
+
+interface TableItem {
+  markdown: string
+  rows: number
+}
+
+interface DocumentDetail {
+  filename: string
+  created_at: string
+  chroma_status: 'success' | 'pending' | 'failed'
+  raw: {
+    original_text: string
+    chunks: any[]
+    tables: TableItem[]
+    charts: any[]  // 아직 데이터 없어서 형식 미확정, 들어오면 추가 연동
+  }
+}
 
 type Props = {
-  file: FileItem
+  documentId: string
   onBack: () => void
 }
 
-const dummyContent: Record<string, string> = {
-  pdf: `회의 일시: 2024년 5월 20일 14:00
-참석자: 김나연, 가동현, 문지수, 이승주
+const formatDate = (dateStr: string) =>
+  new Date(dateStr).toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' })
 
-1. 안건: AI Agent 플랫폼 MVP 범위 확정
-   - 파이프라인 핵심 기능 우선 개발
-   - 문서 업로드 → 요약 → Task 추출 순서로 진행
-   - 6월 2주차 완료 목표
+export default function DocumentOriginal({ documentId, onBack }: Props) {
+  const [doc, setDoc] = useState<DocumentDetail | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [notFound, setNotFound] = useState(false)
 
-2. 백엔드-프론트 API 명세 공유
-   - 이번 주 내로 문서 작성 완료
-   - Notion에 공유 예정
+  useEffect(() => {
+    fetch(`${BASE_URL}/api/documents/${documentId}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.status === 'success') {
+          setDoc(data.document)
+        } else {
+          setNotFound(true)
+        }
+      })
+      .catch(err => {
+        console.error('문서 상세 조회 실패:', err)
+        setNotFound(true)
+      })
+      .finally(() => setLoading(false))
+  }, [documentId])
 
-3. 다음 회의: 5월 27일 10:00`,
-  docx: `프로젝트 기획서
-
-작성일: 2024년 5월 16일
-작성자: 문지수
-
-개요
-본 문서는 AI 업무 자동화 Agent 플랫폼 Agentra의 기획 내용을 담고 있습니다.
-
-목표
-- 회의록, 문서, 음성 파일을 AI가 자동 분석
-- Task 자동 생성 및 담당자 배분
-- Notion 자동 저장`,
-  txt: `팀 미팅 메모 - 2024.05.08
-
-- 각자 진행 상황 공유
-- 가동현: LangGraph 기본 구조 완성
-- 문지수: FastAPI 라우터 설정 완료
-- 김나연: 홈/파이프라인 UI 완성`,
-}
-
-export default function DocumentOriginal({ file, onBack }: Props) {
-  const content = dummyContent[file.icon] ?? '내용을 불러올 수 없습니다.'
+  // rows:1짜리는 OCR이 일반 텍스트를 표로 잘못 인식한 노이즈일 가능성이 높아서 제외
+  // (오탐인 경우 이 필터를 빼면 전부 표시됨)
+  const realTables = (doc?.raw?.tables ?? []).filter(t => t.rows > 1)
 
   return (
     <div>
@@ -56,26 +68,74 @@ export default function DocumentOriginal({ file, onBack }: Props) {
         <span className="text-gray-200 dark:text-gray-700">|</span>
         <div className="flex items-center gap-2">
           <FileText size={15} className="text-gray-400" />
-          <h1 className="text-sm font-medium text-gray-700 dark:text-gray-200">{file.name}</h1>
+          <h1 className="text-sm font-medium text-gray-700 dark:text-gray-200">
+            {doc?.filename ?? '불러오는 중...'}
+          </h1>
         </div>
-        <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-400 ml-auto">
-          원본 파일
-        </span>
+        <div className="ml-auto flex items-center gap-2">
+          {doc?.chroma_status === 'pending' && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-400 flex items-center gap-1">
+              <Clock size={11} /> AI 분석 준비 중
+            </span>
+          )}
+          {doc?.chroma_status === 'failed' && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 dark:bg-red-900/30 text-red-400 flex items-center gap-1">
+              <AlertTriangle size={11} /> AI 분석 기능 일시 중단
+            </span>
+          )}
+          <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-400">
+            원본 파일
+          </span>
+        </div>
       </div>
 
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-600 p-8 min-h-[500px]">
-        <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100 dark:border-gray-700">
-          <div className="w-10 h-10 rounded-xl bg-red-50 dark:bg-red-900/30 flex items-center justify-center">
-            <File size={18} className="text-red-400" />
-          </div>
-          <div>
-            <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{file.name}</p>
-            <p className="text-xs text-gray-400 dark:text-gray-500">{file.size} · {file.date}</p>
-          </div>
+      <div className="flex flex-col gap-4">
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-600 p-8 min-h-[400px]">
+          {loading ? (
+            <p className="text-sm text-gray-400 text-center py-12">불러오는 중...</p>
+          ) : notFound || !doc ? (
+            <p className="text-sm text-gray-400 text-center py-12">문서를 찾을 수 없어요.</p>
+          ) : (
+            <>
+              <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100 dark:border-gray-700">
+                <div className="w-10 h-10 rounded-xl bg-red-50 dark:bg-red-900/30 flex items-center justify-center">
+                  <File size={18} className="text-red-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{doc.filename}</p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500">{formatDate(doc.created_at)}</p>
+                </div>
+              </div>
+              <pre className="text-sm text-gray-700 dark:text-gray-300 leading-7 whitespace-pre-wrap font-sans">
+                {doc.raw?.original_text || '원문 내용이 없어요.'}
+              </pre>
+            </>
+          )}
         </div>
-        <pre className="text-sm text-gray-700 dark:text-gray-300 leading-7 whitespace-pre-wrap font-sans">
-          {content}
-        </pre>
+
+        {/* 표 영역 — 실제 표(rows > 1)가 있을 때만 표시 */}
+        {!loading && doc && realTables.length > 0 && (
+          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-600 p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Table2 size={15} className="text-gray-400" />
+              <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                추출된 표 ({realTables.length}개)
+              </p>
+            </div>
+            <div className="flex flex-col gap-6">
+              {realTables.map((table, i) => (
+                <div key={i} className="overflow-x-auto">
+                  <div className="prose prose-sm dark:prose-invert max-w-none
+                    [&_table]:w-full [&_table]:border [&_table]:border-gray-200 dark:[&_table]:border-gray-700
+                    [&_th]:bg-gray-50 dark:[&_th]:bg-gray-700 [&_th]:text-xs [&_th]:font-medium [&_th]:text-gray-500 dark:[&_th]:text-gray-300 [&_th]:p-2 [&_th]:border [&_th]:border-gray-200 dark:[&_th]:border-gray-700
+                    [&_td]:text-xs [&_td]:text-gray-700 dark:[&_td]:text-gray-200 [&_td]:p-2 [&_td]:border [&_td]:border-gray-100 dark:[&_td]:border-gray-700">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{table.markdown}</ReactMarkdown>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

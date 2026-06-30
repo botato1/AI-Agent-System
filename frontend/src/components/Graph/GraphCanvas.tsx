@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import type React from 'react'
 import * as d3 from 'd3'
 
-type Node = { id: string; group: number; size: number }
+type Node = { id: string; label: string; group: number; size: number }  
 type Link = { source: string; target: string; value: number }
 
 type Props = {
@@ -105,7 +105,7 @@ export default function GraphCanvas({ nodes, links, isDark, getGroupColor, onSel
 
     // 텍스트 (기본엔 희미하게)
     nodeGroup.append('text')
-      .text((d) => d.id)
+      .text((d) => d.label)
       .attr('text-anchor', 'middle')
       .attr('dy', (d) => d.size * 0.8 + 12)
       .attr('font-size', '0px')        // 기본엔 안보이게
