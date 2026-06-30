@@ -22,7 +22,7 @@ from backend.modules.rag.chroma_client import delete_document as chroma_delete_d
 # 8003 문서 처리 서버 URL
 DOCUMENT_PROCESS_URL = os.getenv(
     "DOCUMENT_PROCESS_URL",
-    "http://220.90.180.93:8003/api/document"
+    "http://61.81.98.86:8003/api/document"
 )
 
 ALLOWED_DOCUMENT_EXTENSIONS = {".pdf", ".hwpx", ".png", ".jpg", ".jpeg"}

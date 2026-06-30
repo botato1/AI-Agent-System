@@ -30,7 +30,7 @@ from backend.modules.rag.chroma_client import delete_document as chroma_delete_d
 VOICE_LIBRARY_ROOM_ID = "__voice_library__"
 
 # 8001 STT 서버 URL
-STT_BASE_URL = os.getenv("STT_BASE_URL", "http://192.168.0.2:8001")
+STT_BASE_URL = os.getenv("STT_BASE_URL", "http://192.168.0.32:8001")
 STT_PROCESS_URL = os.getenv("STT_PROCESS_URL", f"{STT_BASE_URL}/api/stt")
 
 # 허용할 음성 확장자
