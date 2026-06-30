@@ -12,6 +12,7 @@ from backend.modules.rag.chroma_client import (
     search_hybrid,
     rerank_results,
     MEETING_COLLECTION,
+    DOCUMENT_COLLECTION,
     KNOWLEDGE_COLLECTION,
     CONTEXT_TO_COLLECTION,
 )
@@ -62,8 +63,6 @@ COL_KEY_MAP = {
     DOCUMENT_COLLECTION:  "document",
     KNOWLEDGE_COLLECTION: "knowledge",
 }
-
-DOCUMENT_COLLECTION = KNOWLEDGE_COLLECTION
 
 
 def get_utc_now() -> str:
