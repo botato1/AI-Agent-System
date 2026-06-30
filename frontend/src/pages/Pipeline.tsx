@@ -51,7 +51,7 @@ export default function Pipeline({
   const startPipeline = async (selectedFile: File) => {
     onUploadStart?.(selectedFile.name)
     setFile(selectedFile.name)
-    setStatuses(Array(6).fill('wait'))
+    setStatuses(Array(steps.length).fill('wait'))
     setLogs([])
     setUploadError(null)
     setIsRunning(true)
@@ -62,7 +62,6 @@ export default function Pipeline({
       formData.append('file', selectedFile)
       formData.append('type', 'document')
       formData.append('room_id', '') 
-      // room_id 없이 업로드 — 백엔드가 필수로 요구하면 지수한테 확인 필요
 
       const uploadRes = await fetch(`${BASE_URL}/api/documents/upload`, {
         method: 'POST',
@@ -88,43 +87,44 @@ export default function Pipeline({
       onUploadEnd?.()
     }
   }
-
-  useEffect(() => {
-    if (currentStep < 0 || currentStep >= 6) {
-      if (currentStep === 6) {
-        setIsRunning(false)
-        onUploadEnd?.()
-        if (Notification.permission === 'granted') {
-          new Notification('문서 분석 완료', {
-            body: `${file} 분석이 완료됐어요!`,
-          })
-        }
+useEffect(() => {
+  if (currentStep < 0 || currentStep >= steps.length) {
+    if (currentStep === steps.length) {
+      setIsRunning(false)
+      onUploadEnd?.()
+      if (Notification.permission === 'granted') {
+        new Notification('문서 분석 완료', {
+          body: `${file} 분석이 완료됐어요!`,
+        })
       }
-      return
     }
+    return
+  }
+  const step = steps[currentStep]
+  if (!step) return // 혹시 모를 범위 밖 값 방어
+
+  setStatuses(prev => {
+    const next = [...prev]
+    next[currentStep] = 'running'
+    return next
+  })
+  addLog(`${step.label} 시작...`)
+  const timer = setTimeout(() => {
     setStatuses(prev => {
       const next = [...prev]
-      next[currentStep] = 'running'
+      next[currentStep] = 'done'
       return next
     })
-    addLog(`${steps[currentStep].label} 시작...`)
-    const timer = setTimeout(() => {
-      setStatuses(prev => {
-        const next = [...prev]
-        next[currentStep] = 'done'
-        return next
-      })
-      addLog(`${steps[currentStep].label} 완료 ✓`)
-      setCurrentStep(prev => prev + 1)
-    }, 1500)
-    return () => clearTimeout(timer)
-  }, [currentStep])
-
+    addLog(`${step.label} 완료 ✓`)
+    setCurrentStep(prev => prev + 1)
+  }, 1500)
+  return () => clearTimeout(timer)
+}, [currentStep])
   useEffect(() => {
     if (reviewFileName) {
       addLog(`재검토 요청: ${reviewFileName}`)
       setFile(reviewFileName)
-      setStatuses(Array(6).fill('wait'))
+      setStatuses(Array(steps.length).fill('wait'))
       setLogs([])
       setCurrentStep(0)
       setIsRunning(true)
@@ -145,7 +145,7 @@ export default function Pipeline({
 
   const reset = () => {
     setFile(null)
-    setStatuses(Array(6).fill('wait'))
+    setStatuses(Array(steps.length).fill('wait'))
     setCurrentStep(-1)
     setLogs([])
     setIsRunning(false)
@@ -224,13 +224,13 @@ export default function Pipeline({
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{file}</p>
-                  <p className="text-xs text-gray-400">{isRunning ? `${doneCount}/6 단계 처리 중...` : '처리 완료 ✓'}</p>
+                  <p className="text-xs text-gray-400">{isRunning ? `${doneCount}/${steps.length} 단계 처리 중...` : '처리 완료 ✓'}</p>
                 </div>
               </div>
               <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1.5 mb-1">
-                <div className="bg-blue-500 h-1.5 rounded-full transition-all duration-500" style={{ width: `${(doneCount / 6) * 100}%` }} />
+                <div className="bg-blue-500 h-1.5 rounded-full transition-all duration-500" style={{ width: `${(doneCount / steps.length) * 100}%` }} />
               </div>
-              <p className="text-xs text-gray-400 text-right">{Math.round((doneCount / 6) * 100)}%</p>
+              <p className="text-xs text-gray-400 text-right">{Math.round((doneCount / steps.length) * 100)}%</p>
             </div>
           )}
 
@@ -303,7 +303,7 @@ export default function Pipeline({
             </div>
           </div>
 
-          {doneCount === 6 && (
+          {doneCount === steps.length && (
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-blue-100 dark:border-blue-800 p-4">
               <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">✅ 처리 완료</h3>
               <button
