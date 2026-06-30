@@ -3,7 +3,7 @@ import uuid
 import wave
 import json
 from datetime import datetime
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
 from ..services.pipeline import process_audio_pipeline
 from ..utils.file_handler import save_upload_file
 from ..core.config import UPLOAD_DIR, logger
@@ -25,6 +25,7 @@ def get_audio_duration(wav_path: str) -> float:
 
 @router.post("/stt")
 async def stt_endpoint(
+    request: Request,
     file: UploadFile = File(...),
     topic: str = Form("")
 ):
@@ -57,7 +58,7 @@ async def stt_endpoint(
         
         # 5. 정적 오디오 스트리밍용 외부 접근 URL 생성
         filename = os.path.basename(save_path)
-        file_url = f"http://localhost:8001/uploads/{filename}"
+        file_url = f"{request.base_url}uploads/{filename}"
         
         # 현 시점의 정확한 UTC 시간 확정 (시간 에러 디버깅 반영)
         current_time_str = datetime.utcnow().isoformat() + "Z"
@@ -73,7 +74,6 @@ async def stt_endpoint(
                 "content": full_content,
                 "chunks": chunks_list,
                 
-                # ⭐ [추가]: 승주님(LLM) 파트 연동을 위한 필수 빈 구조체 선언
                 "summary": "",              # AI 요약 텍스트
                 "keywords": [],             # 핵심 키워드 리스트
                 "action_items": [],         # 할 일/회의 태스크 리스트
@@ -146,7 +146,6 @@ async def get_stt_result_detail(file_id: str):
         raise HTTPException(status_code=500, detail=f"서버 내부 오류: {str(e)}")
 
 
-# ⭐ [추가]: 목록 페이지 파일 삭제 API (WAV 오디오와 JSON 동시 삭제)
 @router.delete("/stt/{file_id}")
 async def delete_stt_record(file_id: str):
     """특정 file_id에 해당하는 원본 오디오 파일과 STT JSON 분석 결과 파일을 동시 삭제합니다."""
@@ -186,7 +185,7 @@ async def delete_stt_record(file_id: str):
 
 
 @router.get("/list")
-async def get_audio_files_list():
+async def get_audio_files_list(request: Request):
     """서버 스토리지 내에 보관된 음성 파일 리스트를 가져옵니다. (original_filename 및 정확한 시간 연동)"""
     try:
         if not os.path.exists(UPLOAD_DIR):
@@ -196,7 +195,7 @@ async def get_audio_files_list():
         for filename in os.listdir(UPLOAD_DIR):
             if filename.lower().endswith(('.wav', '.m4a', '.mp3')):
                 file_path = os.path.join(UPLOAD_DIR, filename)
-                file_url = f"http://localhost:8001/uploads/{filename}"
+                file_url = f"{request.base_url}uploads/{filename}"
                 file_size_mb = round(os.path.getsize(file_path) / (1024 * 1024), 2)
                 
                 file_id = os.path.splitext(filename)[0]
@@ -220,14 +219,14 @@ async def get_audio_files_list():
                 file_list.append({
                     "file_id": file_id, 
                     "filename": filename,
-                    "original_filename": display_name, # ⭐ [추가]: 실제 업로드 파일명
+                    "original_filename": display_name,
                     "url": file_url,
                     "size_mb": file_size_mb,
-                    "created_at": time_stamp           # 🔄 [교정]: 서버 오차 없는 수립 시간 적용
+                    "created_at": time_stamp
                 })
                 
         file_list.sort(key=lambda x: x["created_at"], reverse=True)
         return {"status": "success", "count": len(file_list), "data": file_list, "error": None}
 
     except Exception as e:
-        return {"status": "error", "count": 0, "data": [], "error": str(e)}
+        return {"status": "error", "count": 0, "data": [], "error": str(e)} 

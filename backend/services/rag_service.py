@@ -69,6 +69,64 @@ def get_utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+
+def _resolve_filter(filter: dict | None) -> dict | None:
+    """
+    document_ids 배열이 들어오면 ChromaDB가 이해하는 $in 형식으로 변환.
+    단일 문서일 때만 사용. 다중 문서는 _search_multi_documents()로 분리 검색.
+    """
+    if not filter:
+        return filter
+    document_ids = filter.get("document_ids")
+    if document_ids and isinstance(document_ids, list):
+        print(f"[RAG Service] document_ids 배열 감지 → $in 필터로 변환: {document_ids}")
+        resolved = {k: v for k, v in filter.items() if k != "document_ids"}
+        resolved["document_id"] = {"$in": document_ids}
+        return resolved
+    return filter
+
+
+def _search_multi_documents(query: str, document_ids: list[str], top_k: int) -> dict:
+    """
+    [수정 - 다중 문서 결과 쏠림 해결]
+    기존: document_ids를 $in으로 한 번에 검색 → score 높은 chunk 순서로 잘려서
+         특정 문서 chunk가 score 우위면 다른 문서가 거의 안 잡히는 쏠림 발생.
+    변경: 문서별로 따로 검색해서 문서당 결과를 보장한 뒤 합친다.
+         문서 N개면 문서당 top_k // N개씩 (최소 1개) 확보.
+
+    document_collection / meeting_collection 둘 다 대상이 될 수 있으므로
+    컬렉션 무관하게 document_id 단일 필터로 각각 검색.
+    """
+    n = len(document_ids)
+    if n == 0:
+        return _empty_collection_result()
+
+    per_doc_k = max(1, top_k // n)
+    all_formatted = []
+
+    for doc_id in document_ids:
+        for col in [MEETING_COLLECTION, DOCUMENT_COLLECTION]:
+            raw = search_hybrid(
+                query_text=query,
+                top_k=CANDIDATE_K,
+                filter={"document_id": doc_id},
+                collection_name=col,
+            )
+            if not raw:
+                continue
+            raw = rerank_results(query, raw)
+            raw = _apply_final_score(raw)
+            formatted = _format_documents(raw)
+            # 문서별 top-k만 보장해서 추가 (전체를 합치기 전에 문서 단위로 자름)
+            all_formatted.extend(formatted[:per_doc_k])
+            print(f"[RAG Service] document_id={doc_id} ({col}) → {len(formatted[:per_doc_k])}개 확보")
+
+    if not all_formatted:
+        return _empty_collection_result()
+
+    all_formatted.sort(key=lambda x: x["score"], reverse=True)
+    return _make_collection_result_skip(all_formatted, top_k=top_k, skip_threshold=True)
+
 def _has_specific_document_filter(filter: dict | None) -> bool:
     if not filter:
         return False
@@ -311,17 +369,27 @@ class RAGService:
         print(f"[RAG Service] room_id: {room_id}, filter: {filter}")
 
         try:
-            # document_ids 배열 → $in 필터로 변환
-            filter = _resolve_filter(filter)
-
             collection_results = {
                 "meeting": _empty_collection_result(),
                 "document": _empty_collection_result(),
                 "knowledge": _empty_collection_result(),
             }
 
-            # ── task_from_rag / summary_from_rag / notion_save ──
-            if question_type in ("task_from_rag", "summary_from_rag", "notion_save") and room_id:
+            # ── 다중 문서 선택 (document_ids 2개 이상) ──────────────
+            # $in으로 한 번에 검색하면 score 쏠림이 생기므로 문서별로 분리 검색
+            raw_document_ids = filter.get("document_ids") if filter else None
+            is_multi_doc = bool(raw_document_ids and isinstance(raw_document_ids, list) and len(raw_document_ids) > 1)
+
+            if not is_multi_doc:
+                # 단일 문서(또는 document_ids 1개) / 일반 filter: $in 변환
+                filter = _resolve_filter(filter)
+
+            if is_multi_doc:
+                print(f"[RAG Service] 다중 문서 분리 검색: {raw_document_ids}")
+                multi_result = _search_multi_documents(query, raw_document_ids, top_k=top_k)
+                collection_results["document"] = multi_result
+
+            elif question_type in ("task_from_rag", "summary_from_rag", "notion_save") and room_id:
                 room_docs = get_documents_by_room_id(room_id)
                 print(f"[RAG Service] room_docs: {room_docs}")
                 if not room_docs:
@@ -478,166 +546,6 @@ class RAGService:
             filter=filter,
             question_type=question_type,
             room_id=room_id,
-        )
-        """
-        흐름:
-        1. _select_collections()로 검색할 컬렉션(들) 결정
-        2. 컬렉션별로 따로 하이브리드 검색 (CANDIDATE_K개씩)
-        3. 컬렉션별로 따로 reranker 재평가
-        4. final_score 계산 (knowledge만 tech_score 보정)
-        5. 컬렉션별로 top_k 잘라서 신뢰도 판정 → collection_results에 담음
-        6. 전체 합쳐서 점수 기준 정렬 → data (기존 호환성 유지)
-
-        [수정 - 2026.06.22] 컬렉션별 분리 리팩토링
-        기존: 모든 컬렉션 결과를 합쳐서 점수로만 정렬.
-             "저번 회의에서 나온 에러 해결방안"처럼 회의록+지식 신호가 섞인 질문에서,
-             meeting이 비어있을 때 무관한 knowledge 결과만 5개 나오는 혼란 발생.
-        변경: 컬렉션별로 검색/리랭킹/신뢰도를 따로 계산해서 collection_results에 담음.
-             ollama_client.py가 "회의록: 못 찾음 / 지식: 이렇게 설명" 형태로
-             구분해서 답변 생성 가능. 기존 data/count/low_confidence는 그대로 유지.
-        """
-        print(f"[RAG Service] 쿼리: '{query}' / 타입: '{question_type}'")
-        print(f"[RAG Service] filter: {filter}")
-
-        try:
-            collections_with_queries = _select_collections_with_queries(
-                question_type=question_type,
-                query=query,
-                filter=filter,
-            )
-            collections = [col for col, _ in collections_with_queries]
-            print(f"[RAG Service] 검색 컬렉션: {collections}")
-
-            # 쿼리 정제 결과 로그
-            for col, q in collections_with_queries:
-                key = COL_KEY_MAP.get(col, col)
-                if q != query:
-                    print(f"[RAG Service] {key} 쿼리 정제: '{query}' -> '{q}'")
-
-            # ── 컬렉션별 검색 + 리랭킹 + 포맷 변환 ──────────────
-            per_col: dict[str, list] = {
-                "meeting": [], "document": [], "knowledge": []
-            }
-            seen_ids: set = set()
-
-            for col, col_query in collections_with_queries:
-                raw = search_hybrid(
-                    query_text=col_query,
-                    top_k=CANDIDATE_K,
-                    filter=filter,
-                    collection_name=col,
-                )
-
-                # 중복 제거
-                unique = [r for r in raw if r["id"] not in seen_ids]
-                for r in unique:
-                    seen_ids.add(r["id"])
-
-                if not unique:
-                    continue
-
-                # 이 컬렉션만 따로 리랭킹
-                unique = rerank_results(query, unique)
-                # final_score 계산 + 정렬
-                unique = _apply_final_score(unique)
-                # 포맷 변환
-                formatted = _format_documents(unique)
-
-                key = COL_KEY_MAP.get(col, "knowledge")
-                per_col[key].extend(formatted)
-
-            # ── 컬렉션별 신뢰도 판정 ─────────────────────────────
-            collection_results = {
-                key: (
-                    _make_collection_result(per_col[key], top_k)
-                    if per_col[key]
-                    else _empty_collection_result()
-                )
-                for key in ["meeting", "document", "knowledge"]
-            }
-
-            # ── 전체 합산 (기존 호환성) ───────────────────────────
-            all_docs = []
-            for key in ["meeting", "document", "knowledge"]:
-                all_docs.extend(per_col[key])
-
-            if not all_docs:
-                return {
-                    "status": "success",
-                    "query": query,
-                    "count": 0,
-                    "data": [],
-                    "low_confidence": True,
-                    "collection_results": collection_results,
-                    "searched_collections": [COL_KEY_MAP.get(col, col) for col in collections],
-                    "error": None,
-                }
-
-            all_docs.sort(key=lambda x: x["score"], reverse=True)
-            top_documents = all_docs[:top_k]
-
-            top_score = top_documents[0]["score"] if top_documents else 0
-            is_low_confidence = top_score < LOW_CONFIDENCE_THRESHOLD
-
-            result = {
-                "status": "success",
-                "query":  query,
-                "count":  len(top_documents),
-                "data":   top_documents,
-                "low_confidence": is_low_confidence,
-                "collection_results": collection_results,
-                "searched_collections": [COL_KEY_MAP.get(col, col) for col in collections],
-                "error":  None,
-            }
-
-            confidence_label = "낮음" if is_low_confidence else "정상"
-            cr = collection_results
-            print(
-                f"[RAG Service] 완료 → {len(top_documents)}개 반환 "
-                f"(최고 final_score: {top_score:.4f}, 신뢰도: {confidence_label})"
-            )
-            print(
-                f"[RAG Service] 컬렉션별 → "
-                f"meeting={cr['meeting']['count']}개"
-                f"({'낮음' if cr['meeting']['low_confidence'] else '정상'}), "
-                f"document={cr['document']['count']}개"
-                f"({'낮음' if cr['document']['low_confidence'] else '정상'}), "
-                f"knowledge={cr['knowledge']['count']}개"
-                f"({'낮음' if cr['knowledge']['low_confidence'] else '정상'})"
-            )
-            return result
-
-        except Exception as e:
-            print(f"[RAG Service 에러]: {str(e)}")
-            empty = _empty_collection_result()
-            return {
-                "status": "error",
-                "query":  query,
-                "count":  0,
-                "data":   [],
-                "low_confidence": True,
-                "collection_results": {
-                    "meeting": empty, "document": empty, "knowledge": empty,
-                },
-                "error": f"RAG 파이프라인 장애: {str(e)}",
-            }
-
-    @staticmethod
-    def retrieve_relevant_knowledge_sync(
-        query: str,
-        original_query: str = None,
-        top_k: int = 5,
-        relative_threshold: float = 0.5,
-        filter: dict = None,
-        question_type: str = "general_answer",
-    ) -> dict:
-        return RAGService.retrieve_relevant_knowledge(
-            query=query,
-            original_query=original_query,
-            top_k=top_k,
-            relative_threshold=relative_threshold,
-            filter=filter,
-            question_type=question_type,
         )
 
 
