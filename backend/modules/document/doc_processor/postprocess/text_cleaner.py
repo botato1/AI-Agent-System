@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 from doc_processor.core.models import TextBlock
-from doc_processor.postprocess.spacing_restorer import restore_spacing
+from doc_processor.postprocess.spacing_restorer import restore_multiline, restore_spacing
 
 # ── HTML/XML 태그 제거 ────────────────────────────────────────────────────────
 _HTML_TAG = re.compile(r"<[^>]+>")
@@ -219,7 +219,8 @@ def _clean(text: str) -> str:
     text = _apply_ocr_corrections(text)
     text = _remove_foreign_script_tokens(text)   # 외래 스크립트 아이콘 토큰 제거
     text = _filter_noise_lines(text)
-    text = restore_spacing(text)                 # 자간 분리 한글 복원
+    text = restore_spacing(text)                 # 자간 분리 한글 복원 (단일 줄)
+    text = restore_multiline(text)               # 멀티라인 단편화 보수적 복원
     text = _normalize_whitespace(text)
     return text
 

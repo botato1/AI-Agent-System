@@ -1,16 +1,26 @@
 from __future__ import annotations
 
+import glob
 import os
 import re
 from typing import Any
 
 import numpy as np
 from PIL import Image
+
+# paddlepaddle-gpu nvidia CUDA DLL 경로 등록 (Windows)
+if os.name == "nt":
+    import site
+    for _sp in site.getsitepackages():
+        for _d in glob.glob(os.path.join(_sp, "nvidia", "*", "bin")):
+            os.add_dll_directory(_d)
+
 from paddleocr import PaddleOCR
 
 os.environ.setdefault("FLAGS_use_onednn", "0")
 os.environ.setdefault("FLAGS_use_mkldnn", "0")
 os.environ.setdefault("DNNL_DEFAULT_FPMATH_MODE", "STRICT")
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 
 
 def _normalize(text: str) -> str:

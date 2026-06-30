@@ -13,10 +13,51 @@ import re
 _SINGLE_KO = re.compile(r'^[가-힣]$')
 _MIN_RUN = 3
 
+# 멀티라인 복원: 짧은 줄(≤2자, 한글/영문만) + 다음 줄(≥5자, 한글 시작) → 병합
+_SHORT_ONLY_KO_EN = re.compile(r'^[가-힣a-zA-Z]{1,2}$')
+
 
 def restore_spacing(text: str) -> str:
     lines = text.split('\n')
     return '\n'.join(_restore_line(line) for line in lines)
+
+
+def restore_multiline(text: str) -> str:
+    """여러 줄에 걸쳐 단편화된 텍스트를 보수적으로 병합합니다.
+
+    조건 (둘 다 충족 시에만 병합):
+      - 현재 줄: 2글자 이하이고 한글 또는 영문자만 구성
+      - 다음 줄: 5글자 이상이고 한글로 시작
+
+    예: "장\\n매 출 성\\n5.6%)" → "장매 출 성\\n5.6%)"
+    """
+    lines = text.split('\n')
+    if len(lines) < 2:
+        return text
+
+    result: list[str] = []
+    i = 0
+    while i < len(lines):
+        current = lines[i]
+        stripped = current.strip()
+
+        next_stripped = lines[i + 1].strip() if i + 1 < len(lines) else ""
+        next_starts_ko = bool(next_stripped) and '가' <= next_stripped[0] <= '힣'
+        if (
+            i + 1 < len(lines)
+            and _SHORT_ONLY_KO_EN.match(stripped)
+            and len(next_stripped) >= 5
+            and next_starts_ko
+        ):
+            # 병합: 현재 줄을 다음 줄 앞에 붙임
+            lines[i + 1] = stripped + lines[i + 1]
+            i += 1
+            continue
+
+        result.append(current)
+        i += 1
+
+    return '\n'.join(result)
 
 
 def _restore_line(line: str) -> str:
