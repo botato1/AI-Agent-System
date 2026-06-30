@@ -82,7 +82,9 @@ def _resolve_question_type(question_type: str, has_document_target: bool, mentio
 
     # 문서 타겟 + 요약/비교 키워드 → summary_from_rag로 보정
     # (knowledge_search로 잘못 분류되는 것을 방지)
-    if has_document_target and mentions_document_target and (mentions_summary or mentions_compare):
+    # 다중 문서 비교("두 문서 비교해줘")는 DOCUMENT_TARGET_KEYWORDS의
+    # "이 문서/해당 문서" 패턴과 안 맞을 수 있어 mentions_document_target은 체크하지 않는다.
+    if has_document_target and (mentions_summary or mentions_compare):
         return "summary_from_rag"
 
     if (
