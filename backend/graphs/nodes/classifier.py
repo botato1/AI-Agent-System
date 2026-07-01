@@ -6,7 +6,6 @@ from backend.services.ollama_service import ollama_service
 VALID_QUESTION_TYPES = {
     "task_from_rag",
     "task_from_memory",
-    "notion_save",
     "knowledge_search",
     "general_answer",
     "summary_from_rag",
@@ -51,37 +50,16 @@ MEMORY_TARGET_KEYWORDS = [
     "추출한 할 일", "추출한 할일", "할 일 목록", "할일 목록",
 ]
 
-NOTION_SAVE_KEYWORDS = [
-    "노션에 저장", "노션 저장", "notion에 저장", "notion 저장",
-    "노션에 기록", "노션 기록", "노션에 적어", "노션에 올려",
-    "notion에 기록", "notion에 적어", "notion에 올려",
-]
-
-NOTION_ACTION_KEYWORDS = ["저장", "기록", "적어", "올려"]
-
 
 # helper 함수
 def _contains_any(text: str, keywords: list[str]) -> bool:
     return any(keyword in text for keyword in keywords)
 
 
-def _detect_notion_save(message: str, message_lower: str) -> bool:
-    if _contains_any(message_lower, NOTION_SAVE_KEYWORDS):
-        return True
-
-    is_notion = "노션" in message_lower or "notion" in message_lower
-    has_action = _contains_any(message, NOTION_ACTION_KEYWORDS)
-
-    return is_notion and has_action
-
-
 def _resolve_question_type(question_type: str, has_document_target: bool, mentions_document_target: bool, mentions_task: bool,
-    mentions_knowledge: bool, mentions_summary: bool, mentions_compare: bool, mentions_memory_target: bool, mentions_notion_save: bool) -> str:
-    if mentions_notion_save:
-        return "notion_save"
-
+    mentions_knowledge: bool, mentions_summary: bool, mentions_compare: bool, mentions_memory_target: bool) -> str:
     # 문서 타겟 + 요약/비교 키워드 → summary_from_rag로 보정
-    # (knowledge_search로 잘못 분류되는 것을 방지)
+    # knowledge_search로 잘못 분류되는 것을 방지
     # 다중 문서 비교("두 문서 비교해줘")는 DOCUMENT_TARGET_KEYWORDS의
     # "이 문서/해당 문서" 패턴과 안 맞을 수 있어 mentions_document_target은 체크하지 않는다.
     if has_document_target and (mentions_summary or mentions_compare):
@@ -116,24 +94,18 @@ def _resolve_question_type(question_type: str, has_document_target: bool, mentio
     return question_type
 
 
-def _build_need_flags(question_type: str, has_document_target: bool, mentions_document_target: bool,
-    mentions_document_save_target: bool, mentions_memory_target: bool) -> dict:
-    notion_requires_rag = (
-        question_type == "notion_save"
-        and (has_document_target or mentions_document_target or mentions_document_save_target)
-        and not mentions_memory_target
-    )
-
-    notion_requires_memory = (
-        question_type == "notion_save"
-        and not notion_requires_rag
-    )
-
+def _build_need_flags(question_type: str) -> dict:
     return {
-        "need_memory": question_type == "task_from_memory" or notion_requires_memory,
-        "need_rag": question_type in {"task_from_rag", "knowledge_search", "summary_from_rag"} or notion_requires_rag,
-        "need_task_extract": question_type in {"task_from_rag", "task_from_memory"},
-        "need_notion_save": question_type == "notion_save",
+        "need_memory": question_type == "task_from_memory",
+        "need_rag": question_type in {
+            "task_from_rag",
+            "knowledge_search",
+            "summary_from_rag",
+        },
+        "need_task_extract": question_type in {
+            "task_from_rag",
+            "task_from_memory",
+        },
         "need_general_answer": question_type == "general_answer",
     }
 
@@ -172,7 +144,12 @@ def classifier_node(state: AgentState) -> AgentState:
         mentions_summary = _contains_any(user_message_lower, SUMMARY_KEYWORDS)
         mentions_compare = _contains_any(user_message_lower, COMPARE_KEYWORDS)
         mentions_memory_target = _contains_any(user_message, MEMORY_TARGET_KEYWORDS)
-        mentions_notion_save = _detect_notion_save(user_message, user_message_lower)
+
+        # "문서 요약해줘", "파일 내용 정리해줘"처럼
+        # 직접적인 DOCUMENT_TARGET_KEYWORDS가 없어도 문서 관련 단어가 있으면
+        # 문서 대상 요청으로 보정
+        if mentions_document_save_target and has_document_target:
+            mentions_document_target = True
 
         question_type = _resolve_question_type(
             question_type=question_type,
@@ -183,15 +160,10 @@ def classifier_node(state: AgentState) -> AgentState:
             mentions_summary=mentions_summary,
             mentions_compare=mentions_compare,
             mentions_memory_target=mentions_memory_target,
-            mentions_notion_save=mentions_notion_save,
         )
 
         need_flags = _build_need_flags(
             question_type=question_type,
-            has_document_target=has_document_target,
-            mentions_document_target=mentions_document_target,
-            mentions_document_save_target=mentions_document_save_target,
-            mentions_memory_target=mentions_memory_target,
         )
 
         return {
@@ -213,7 +185,6 @@ def classifier_node(state: AgentState) -> AgentState:
             "need_memory": False,
             "need_rag": False,
             "need_task_extract": False,
-            "need_notion_save": False,
             "target_document_id": state.get("target_document_id"),
             "target_filename": state.get("target_filename"),
             "rag_filter": state.get("rag_filter"),
