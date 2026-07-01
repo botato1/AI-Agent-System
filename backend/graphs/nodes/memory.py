@@ -8,6 +8,7 @@ MEMORY_SKIP_KEYWORDS = [
     "정리해줘", "추출해줘",
 ]
 
+
 # sqlite3.Row 또는 tuple/list 모두 대응하는 안전 접근 함수
 def _get_value(row, key: str, index: int, default=None):
     try:
@@ -25,14 +26,8 @@ def _is_extract_request(content: str, current_user_message: str) -> bool:
         keyword in content for keyword in MEMORY_SKIP_KEYWORDS
     )
 
-# Notion 저장 결과 메시지를 제외한 유효한 assistant 답변인지 확인
-def _is_valid_assistant_answer(content: str) -> bool:
-    return (
-        not content.startswith("Notion에 저장했습니다.")
-        and "Notion 저장 중 오류가 발생했습니다" not in content
-    )
 
-# 대화 기록에서 memory_context와 Notion 저장 대상 콘텐츠를 추출하는 LangGraph 노드
+# 대화 기록에서 memory_context와 최근 assistant 답변을 추출하는 LangGraph 노드
 def memory_node(state: AgentState) -> AgentState:
     if not state.get("need_memory", False):
         return {
@@ -67,9 +62,10 @@ def memory_node(state: AgentState) -> AgentState:
             if role == "user":
                 if _is_extract_request(content, current_user_message):
                     continue
+
                 memory_lines.append(f"user: {content}")
 
-            if role == "assistant" and _is_valid_assistant_answer(content):
+            if role == "assistant":
                 last_assistant_answer = content
 
         return {

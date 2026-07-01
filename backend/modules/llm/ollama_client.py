@@ -40,7 +40,6 @@ DOBY_SYSTEM_GUIDE = """
 - 문서 기반 질문에 답변한다.
 - 회의록에서 담당자, 할 일, 마감일을 정리한다.
 - 개인 일정이나 업무 일정을 정리하고 관리할 수 있도록 돕는다.
-- 이전 답변이나 분석 결과를 Notion 저장 흐름과 연결한다.
 - 개발자, IT 직무 종사자, 프로젝트 팀원이 업무를 정리할 수 있도록 돕는다.
 
 [제한 사항]
@@ -80,16 +79,15 @@ def normalize_query(user_input: str) -> str:
     return response_text
 
 
-# ── 의도 분류 (5개 카테고리로 단순화) ──────────────────────────
+# ── 의도 분류 (4개 카테고리로 단순화) ──────────────────────────
 VALID_INTENTS = [
     "task_from_rag",      # RAG 자료(회의록/문서) 기반 할일 추출
     "task_from_memory",   # 채팅 기록 기반 할일 추출
-    "notion_save",        # RAG 자료를 찾아서 Notion에 저장
     "knowledge_search",   # RAG 자료로 답변 생성 (에러해결/문서질문/회의검색 등)
     "general_answer",     # RAG/memory 둘 다 불필요, 바로 답변
 ]
 
-INTENT_CLASSIFICATION_PROMPT = """[INST] 다음 사용자 질문을 아래 5개 카테고리 중 정확히 하나로 분류하세요.
+INTENT_CLASSIFICATION_PROMPT = """[INST] 다음 사용자 질문을 아래 4개 카테고리 중 정확히 하나로 분류하세요.
 
 카테고리:
 - task_from_rag: 회의록이나 업로드한 문서에서 할 일/액션아이템을 추출해달라는 요청.
@@ -99,9 +97,6 @@ INTENT_CLASSIFICATION_PROMPT = """[INST] 다음 사용자 질문을 아래 5개 
 
 - task_from_memory: 방금 나눈 대화나 채팅 기록에서 할 일을 추출해달라는 요청
   예: "방금 대화에서 할 일 뽑아줘", "우리가 얘기한 내용에서 액션아이템 정리해줘"
-
-- notion_save: 회의록/문서/기술자료를 찾아서 Notion에 저장하거나 정리해달라는 요청
-  예: "저번 회의록 노션에 저장해줘", "이 내용 정리해서 노션에 적어줘"
 
 - knowledge_search: 회의록/업로드문서/기술지식에서 정보를 찾아 답변이 필요한 질문.
   도커, 쿠버네티스, 깃허브, CI/CD, 배포, 네트워크 등 개발/인프라 기술 관련 질문도 포함.
@@ -120,7 +115,7 @@ INTENT_CLASSIFICATION_PROMPT = """[INST] 다음 사용자 질문을 아래 5개 
 
 
 def classify_intent(user_input: str) -> dict:
-    """사용자 질문 의도 파악 (5개 카테고리)"""
+    """사용자 질문 의도 파악 (개 카테고리)"""
     prompt = INTENT_CLASSIFICATION_PROMPT.format(user_input=user_input)
 
     response = httpx.post(
@@ -497,8 +492,8 @@ def generate_answer_for_graph(
 ) -> str:
     """
     question_type에 따라 프롬프트 자동 구성 후 LLM 호출.
-    question_type 5개: task_from_rag, task_from_memory,
-                        notion_save, knowledge_search, general_answer
+    question_type 4개: task_from_rag, task_from_memory,
+                        knowledge_search, general_answer
 
     [수정 사항 - 2026.06.17]
     knowledge_search 분기에서 발생하던 "참고 문서가 제공되지 않았습니다" 오답 수정.
@@ -625,26 +620,6 @@ def generate_answer_for_graph(
 [/INST]"""
         return _call_ollama(prompt)
 
-    # ── notion_save ──
-    if question_type == "notion_save" and rag_context:
-        prompt = f"""[INST]
-{DOBY_SYSTEM_GUIDE}
-
-아래 참고 문서 내용을 Notion에 저장할 형태로 정리해줘.
-
-[규칙]
-- 참고 문서에 없는 내용은 추가하지 마라.
-- 핵심 내용만 간결하게 정리해라.
-- 한국어로 작성해라.
-
-[참고 문서]
-{rag_context}
-
-사용자 질문:
-{user_message}
-[/INST]"""
-        return _call_ollama(prompt)
-
     # ── general_answer 또는 fallback ──
     prompt = f"""
 {DOBY_SYSTEM_GUIDE}
@@ -652,7 +627,7 @@ def generate_answer_for_graph(
 사용자 질문에 답해줘.
 
 [규칙]
-- 도비가 할 수 있는 일은 IT 프로젝트 업무 지원, 문서 요약, 회의록 정리, 문서 기반 질의응답, 할 일 추출, Notion 저장 보조이다.
+- 도비가 할 수 있는 일은 IT 프로젝트 업무 지원, 문서 요약, 회의록 정리, 문서 기반 질의응답, 할 일 추출이다.
 - 날씨, 뉴스, 주식, 실시간 검색 같은 기능을 할 수 있다고 말하지 마라.
 - 답변은 한국어로 작성해라.
 
@@ -700,37 +675,6 @@ JSON:
 
     raw_answer = _call_ollama(prompt)
     return _parse_json_array(raw_answer)
-
-
-# ── Notion 저장용 요약 ────────────────────────────────────────
-def generate_summary_for_notion(content: str) -> str | None:
-    """Notion 저장용 요약 생성"""
-    if not content or not content.strip():
-        return None
-
-    prompt = f"""[INST]
-아래 원본 내용을 Notion에 함께 저장할 요약문으로 정리해줘.
-
-[규칙]
-- 원본에 없는 내용은 추가하지 마라.
-- 핵심 내용만 간결하게 정리해라.
-- 한국어로 작성해라.
-- 제목은 만들지 마라.
-- 3~5개 bullet point 또는 짧은 문단으로 작성해라.
-
-원본 내용:
-{content}
-
-요약:
-[/INST]"""
-    result = _call_ollama(prompt)
-
-    # 최종 중국어 감지 시 None 반환 (저장 안 함)
-    if has_chinese(result):
-        print("[generate_summary_for_notion] 중국어 감지 → None 반환")
-        return None
-
-    return result
 
 
 # ── 화자분리 보완 ─────────────────────────────────────────────
@@ -954,12 +898,12 @@ if __name__ == "__main__":
     result = normalize_query("쿠버 파드 뻗었어")
     print(f"변환 결과: {result}")
 
-    print("\n=== 의도 분류 테스트 (5개 카테고리) ===")
+    print("\n=== 의도 분류 테스트 (4개 카테고리) ===")
     test_queries = [
         "회의록에서 할 일 추출해줘",
         "방금 대화에서 할 일 뽑아줘",
-        "저번 회의록 노션에 저장해줘",
         "쿠버 파드 뻗었는데 어떻게 해결해",
+        "이 문서 요약해줘",
         "winmain이 뭐야",
     ]
     for q in test_queries:

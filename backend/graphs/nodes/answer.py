@@ -68,14 +68,6 @@ def answer_node(state: AgentState) -> AgentState:
     memory_context = state.get("memory_context") or ""
     tasks = _clean_tasks_for_answer(state.get("tasks") or [])
 
-    if state.get("need_notion_save", False):
-        return {
-            **state,
-            "tasks": tasks,
-            "final_answer": state.get("final_answer") or "Notion 저장 요청을 확인했습니다. 저장을 진행하겠습니다.",
-            "current_step": "answer_node",
-            "error": state.get("error"),
-        }
 
     if state.get("need_rag", False):
         if not rag_context.strip() and not rag_search_result:

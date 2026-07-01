@@ -6,7 +6,6 @@ from backend.graphs.nodes.memory import memory_node
 from backend.graphs.nodes.rag import rag_node
 from backend.graphs.nodes.task import task_node
 from backend.graphs.nodes.answer import answer_node
-from backend.graphs.nodes.notion import notion_node
 
 
 def route_after_classifier(state: AgentState) -> str:
@@ -15,7 +14,7 @@ def route_after_classifier(state: AgentState) -> str:
     if question_type == "task_from_memory":
         return "memory"
 
-    if question_type in {"task_from_rag", "notion_save", "knowledge_search", "summary_from_rag"}:
+    if question_type in {"task_from_rag", "knowledge_search", "summary_from_rag"}:
         return "rag"
 
     return "answer"
@@ -36,9 +35,6 @@ def route_after_rag(state: AgentState) -> str:
     if question_type == "task_from_rag":
         return "task"
 
-    if question_type == "notion_save":
-        return "notion"
-
     return "answer"
 
 
@@ -54,7 +50,6 @@ def build_agent_graph():
     graph.add_node("rag", rag_node)
     graph.add_node("task", task_node)
     graph.add_node("answer", answer_node)
-    graph.add_node("notion", notion_node)
 
     graph.add_edge(START, "classifier")
 
@@ -82,7 +77,6 @@ def build_agent_graph():
         route_after_rag,
         {
             "task": "task",
-            "notion": "notion",
             "answer": "answer",
         },
     )
@@ -97,7 +91,6 @@ def build_agent_graph():
         },
     )
 
-    graph.add_edge("notion", END)
 
     return graph.compile()
 
