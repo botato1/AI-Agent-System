@@ -266,7 +266,6 @@ def _format_documents(raw_results: list) -> list:
             "language":       meta.get("language", "ko"),
             "created_at":     meta.get("created_at", get_utc_now()),
             "status":         meta.get("status", "processed"),
-            "notion_url":     meta.get("notion_url", ""),
             "chroma_id":      meta.get("chroma_id", ""),
             "error":          meta.get("error", ""),
             "user_edited":    meta.get("user_edited", False),
@@ -389,7 +388,7 @@ class RAGService:
                 multi_result = _search_multi_documents(query, raw_document_ids, top_k=top_k)
                 collection_results["document"] = multi_result
 
-            elif question_type in ("task_from_rag", "summary_from_rag", "notion_save") and room_id:
+            elif question_type in ("task_from_rag", "summary_from_rag") and room_id:
                 room_docs = get_documents_by_room_id(room_id)
                 print(f"[RAG Service] room_docs: {room_docs}")
                 if not room_docs:

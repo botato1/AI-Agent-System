@@ -14,7 +14,6 @@ from backend.modules.llm.ollama_client import (
     classify_intent,
     generate_answer_for_graph as client_generate_answer_for_graph,
     extract_tasks_from_content as client_extract_tasks_from_content,
-    generate_summary_for_notion as client_generate_summary_for_notion,
 )
 from backend.services.rag_service import rag_service
 
@@ -26,8 +25,8 @@ class OllamaService:
     의도분류 체계:
     - task_from_rag     : RAG 자료(회의록/문서) 기반 할일 추출
     - task_from_memory  : 채팅 기록 기반 할일 추출
-    - notion_save       : Notion 저장
     - knowledge_search  : RAG 자료로 답변 생성
+    - summary_from_rag  : RAG 자료 기반 요약
     - general_answer    : RAG/memory 둘 다 불필요
     """
 
@@ -64,16 +63,6 @@ class OllamaService:
         return any(keyword in message for keyword in memory_keywords)
 
     @staticmethod
-    def is_notion_save_request(message: str) -> bool:
-        message_lower = message.lower()
-        notion_keywords = ["노션", "notion"]
-        save_keywords = ["저장", "기록", "보관", "정리해줘", "올려줘"]
-        return (
-            any(keyword in message_lower for keyword in notion_keywords)
-            and any(keyword in message for keyword in save_keywords)
-        )
-
-    @staticmethod
     def is_task_request(message: str) -> bool:
         task_keywords = [
             "할 일", "해야 할 일", "업무", "태스크", "task",
@@ -91,7 +80,6 @@ class OllamaService:
             "need_memory": False,
             "need_rag": False,
             "need_task_extract": False,
-            "need_notion_save": False,
         }
 
         if intent == "task_from_rag":
@@ -104,13 +92,12 @@ class OllamaService:
             result["need_memory"] = True
             result["need_task_extract"] = True
 
-        elif intent == "notion_save":
-            result["question_type"] = "notion_save"
-            result["need_rag"] = True
-            result["need_notion_save"] = True
-
         elif intent == "knowledge_search":
             result["question_type"] = "knowledge_search"
+            result["need_rag"] = True
+
+        elif intent == "summary_from_rag":
+            result["question_type"] = "summary_from_rag"
             result["need_rag"] = True
 
         else:
@@ -120,7 +107,6 @@ class OllamaService:
             result["need_memory"]
             or result["need_rag"]
             or result["need_task_extract"]
-            or result["need_notion_save"]
         )
 
         return result
@@ -136,6 +122,11 @@ class OllamaService:
             intent = intent_result.get("intent", "general_answer")
         except Exception as e:
             print(f"[OllamaService classify_for_graph 에러]: {str(e)}")
+            intent = "general_answer"
+
+        # v1에서 남아있는 notion_save intent가 들어오더라도
+        # v2에서는 지원하지 않으므로 general_answer로 보정
+        if intent == "notion_save":
             intent = "general_answer"
 
         mapped = OllamaService.map_intent_to_agent_flags(intent)
@@ -154,16 +145,10 @@ class OllamaService:
                 mapped["need_rag"] = True
                 mapped["need_task_extract"] = True
 
-        if OllamaService.is_notion_save_request(normalized) and not mapped["need_notion_save"]:
-            mapped["question_type"] = "notion_save"
-            mapped["need_rag"] = True
-            mapped["need_notion_save"] = True
-
         mapped["need_general_answer"] = not (
             mapped["need_memory"]
             or mapped["need_rag"]
             or mapped["need_task_extract"]
-            or mapped["need_notion_save"]
         )
 
         return {
@@ -174,7 +159,6 @@ class OllamaService:
             "need_memory": mapped["need_memory"],
             "need_rag": mapped["need_rag"],
             "need_task_extract": mapped["need_task_extract"],
-            "need_notion_save": mapped["need_notion_save"],
             "target_filename": target_filename,
         }
 
@@ -240,7 +224,6 @@ class OllamaService:
                 "score": doc.get("score"),
                 "importance": doc.get("importance") or doc.get("importance_score"),
                 "created_at": doc.get("created_at"),
-                "notion_url": doc.get("notion_url"),
                 "tags": doc.get("tags"),
             })
 
@@ -290,10 +273,6 @@ class OllamaService:
     @staticmethod
     def extract_tasks_from_content(content: str) -> list[dict]:
         return client_extract_tasks_from_content(content)
-
-    @staticmethod
-    def generate_summary_for_notion(content: str) -> str | None:
-        return client_generate_summary_for_notion(content)
 
     # ── 단일 파이프라인 테스트용 함수 ────────────────────────
 
