@@ -13,7 +13,8 @@ RUN apt-get update && apt-get install -y \
 # requirements.txt 먼저 복사 후 패키지 설치
 # (코드 변경 시 캐시 활용을 위해 분리)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir torch==2.5.1+cu121 torchaudio==2.5.1+cu121 torchvision==0.20.1+cu121 --index-url https://download.pytorch.org/whl/cu121 \
+    && pip install --no-cache-dir -r requirements.txt
 
 # 전체 코드 복사
 COPY . .
